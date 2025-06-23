@@ -164,10 +164,12 @@ if(WGVK_BUILD_EXAMPLES)
     add_executable(glfw_surface "examples/glfw_surface.c")
     add_executable(basic_compute "examples/basic_compute.c")
     add_executable(rgfw_surface "examples/rgfw_surface.c")
+    add_executable(cpp_api "examples/cpp_api.cpp")
     
     # Examples always link against the final `wgvk` target. Thanks to the fix above,
     # they will now correctly inherit all necessary compile definitions.
     target_link_libraries(glfw_surface PUBLIC wgvk glfw)
     target_link_libraries(basic_compute PUBLIC wgvk glfw)
     target_link_libraries(rgfw_surface PUBLIC wgvk)
+    target_link_libraries(cpp_api PUBLIC wgvk)
 endif()

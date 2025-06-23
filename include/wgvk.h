@@ -306,7 +306,8 @@ typedef enum TextureDimension{
     //TextureViewDimension_2DArray = 0x00000003,
     //TextureViewDimension_Cube = 0x00000004,
     //TextureViewDimension_CubeArray = 0x00000005,
-    WGPUTextureDimension_3D = 0x00000003
+    WGPUTextureDimension_3D = 0x00000003,
+    WGPUTextureDimension_Force32 = 0x7fffffff
 }WGPUTextureDimension;
 
 
@@ -770,6 +771,29 @@ typedef enum WGPUMapAsyncStatus {
     WGPUMapAsyncStatus_Force32 = 0x7FFFFFFF
 } WGPUMapAsyncStatus WGPU_ENUM_ATTRIBUTE;
 
+typedef enum WGPUExternalTextureRotation {
+    WGPUExternalTextureRotation_Rotate0Degrees = 0x00000001,
+    WGPUExternalTextureRotation_Rotate90Degrees = 0x00000002,
+    WGPUExternalTextureRotation_Rotate180Degrees = 0x00000003,
+    WGPUExternalTextureRotation_Rotate270Degrees = 0x00000004,
+    WGPUExternalTextureRotation_Force32 = 0x7FFFFFFF
+} WGPUExternalTextureRotation WGPU_ENUM_ATTRIBUTE;
+
+typedef enum WGPULoggingType {
+    WGPULoggingType_Verbose = 0x00000001,
+    WGPULoggingType_Info = 0x00000002,
+    WGPULoggingType_Warning = 0x00000003,
+    WGPULoggingType_Error = 0x00000004,
+    WGPULoggingType_Force32 = 0x7FFFFFFF
+} WGPULoggingType WGPU_ENUM_ATTRIBUTE;
+
+typedef enum WGPUAlphaMode {
+    WGPUAlphaMode_Opaque = 0x00000001,
+    WGPUAlphaMode_Premultiplied = 0x00000002,
+    WGPUAlphaMode_Unpremultiplied = 0x00000003,
+    WGPUAlphaMode_Force32 = 0x7FFFFFFF
+} WGPUAlphaMode WGPU_ENUM_ATTRIBUTE;
+
 typedef enum WGPUCompositeAlphaMode {
     WGPUCompositeAlphaMode_Auto = 0x00000000,
     WGPUCompositeAlphaMode_Opaque = 0x00000001,
@@ -915,6 +939,12 @@ typedef struct WGPUTexelCopyBufferInfo {
     WGPUBuffer buffer;
 } WGPUTexelCopyBufferInfo;
 
+
+typedef struct WGPUOrigin2D {
+    uint32_t x;
+    uint32_t y;
+} WGPUOrigin2D;
+
 typedef struct WGPUOrigin3D {
     uint32_t x;
     uint32_t y;
@@ -924,6 +954,11 @@ typedef struct WGPUOrigin3D {
 typedef struct WGPUFuture {
     uint64_t id;
 } WGPUFuture;
+
+typedef struct WGPUExtent2D {
+    uint32_t width;
+    uint32_t height;
+} WGPUExtent2D;
 
 typedef struct WGPUExtent3D {
     uint32_t width;
@@ -1187,6 +1222,29 @@ typedef struct WGPURenderPassDepthStencilAttachment{
     uint32_t stencilClearValue;
     uint32_t stencilReadOnly;
 }WGPURenderPassDepthStencilAttachment;
+
+typedef struct WGPUShaderModuleCompilationOptions {
+    WGPUChainedStruct chain;
+    WGPUBool strictMath;
+} WGPUShaderModuleCompilationOptions WGPU_STRUCTURE_ATTRIBUTE;
+
+typedef struct WGPURenderPassDescriptorExpandResolveRect {
+    WGPUChainedStruct chain;
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} WGPURenderPassDescriptorExpandResolveRect WGPU_STRUCTURE_ATTRIBUTE;
+
+typedef struct WGPURenderPassDescriptorResolveRect {
+    WGPUChainedStruct chain;
+    uint32_t colorOffsetX;
+    uint32_t colorOffsetY;
+    uint32_t resolveOffsetX;
+    uint32_t resolveOffsetY;
+    uint32_t width;
+    uint32_t height;
+} WGPURenderPassDescriptorResolveRect WGPU_STRUCTURE_ATTRIBUTE;
 
 typedef struct WGPURenderPassDescriptor {
     WGPUChainedStruct * nextInChain;
