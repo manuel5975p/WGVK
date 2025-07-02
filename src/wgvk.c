@@ -1435,8 +1435,8 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     }
     else{
-        propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        //propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        //propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     }
 
     #if USE_VMA_ALLOCATOR == 1
@@ -2829,7 +2829,8 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
     };
     device->functions.vkCmdBeginRendering(destination, &info);
     #endif
-    
+    float ones[4] = {1,1,1,1};
+    device->functions.vkCmdSetBlendConstants(destination, ones);
     const float vpWidth = (float)beginInfo->colorAttachments[0].view->width;
     const float vpHeight = (float)beginInfo->colorAttachments[0].view->height;
     
@@ -3180,7 +3181,9 @@ void recordVkCommands(VkCommandBuffer destination, WGPUDevice device, const Rend
     };
 
     for(size_t i = 0;i < commands->size;i++){
-        recordVkCommand(&cal, commands->data + i, beginInfo);
+        const RenderPassCommandGeneric* cmd = RenderPassCommandGenericVector_get((RenderPassCommandGenericVector*)commands, i);
+
+        recordVkCommand(&cal, cmd, beginInfo);
     }
 }
 
@@ -4360,6 +4363,9 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPUR
         for (size_t i = 0; i < descriptor->fragment->targetCount; ++i) {
             const WGPUColorTargetState* target = &descriptor->fragment->targets[i];
             // Defaults for no blending
+            if(target->writeMask == WGPUColorWriteMask_None){
+                fprintf(stderr, "RenderPipelineDescriptor->fragment->target[%u] has an empty color write mask\n", (unsigned)i);
+            }
             colorBlendAttachments[i].colorWriteMask =  toVulkanColorWriteMask(target->writeMask);
             colorBlendAttachments[i].blendEnable = VK_FALSE;
             colorBlendAttachments[i].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -5142,7 +5148,7 @@ void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder rpe, uint32_t bi
         .setVertexBuffer = {
             binding,
             buffer,
-            offset
+            offset,
         }
     };
 
