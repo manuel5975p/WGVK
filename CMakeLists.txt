@@ -12,6 +12,8 @@ if(EMSCRIPTEN)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -sASYNCIFY=2 -sUSE_GLFW=3")
 endif()
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 function(wgvk_bundle_libraries output_target)
   function(get_dependencies input_target)
     get_target_property(alias ${input_target} ALIASED_TARGET)
@@ -54,16 +56,16 @@ endfunction()
 
 # Lock in static for now
 if(EMSCRIPTEN)
-  set(WGVK_CORE_SRC_LIST "src/dummy.c")
+  set(WGVK_CORE_SRC_LIST "${CMAKE_CURRENT_SOURCE_DIR}/src/dummy.c")
 else()
-  set(WGVK_CORE_SRC_LIST "src/wgvk.c")
+  set(WGVK_CORE_SRC_LIST "${CMAKE_CURRENT_SOURCE_DIR}/src/wgvk.c")
 endif()
 if(SANITIZE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=${SANITIZE}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${SANITIZE}")
 endif()
 if(WGVK_USE_VMA)
-    list(APPEND WGVK_CORE_SRC_LIST "src/vma_impl.cpp")
+    list(APPEND WGVK_CORE_SRC_LIST "${CMAKE_CURRENT_SOURCE_DIR}/src/vma_impl.cpp")
 endif()
 set(CMAKE_C_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
@@ -73,12 +75,15 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-DNDEBUG -g3 -O3")
 set(WGVK_PRIMARY_TARGET_NAME "")
 
 if(WGVK_BUILD_WGSL_SUPPORT)
-    set(WGVK_PRIMARY_TARGET_NAME "wgvk_core")
+    set(WGVK_PRIMARY_TARGET_NAME "wgvk")
 
-    add_library(${WGVK_PRIMARY_TARGET_NAME} STATIC ${WGVK_CORE_SRC_LIST})
+    add_library(${WGVK_PRIMARY_TARGET_NAME} ${WGVK_CORE_SRC_LIST})
     # Add all properties as PUBLIC. This means they are used to build wgvk_core itself,
     # and they are part of its public interface to be inherited by consumers.
-    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
+    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1 WGVK_DISABLE_ASSERT=1)
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1)
+    endif()
     if(NOT EMSCRIPTEN)
       target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
     endif()
@@ -105,34 +110,28 @@ if(WGVK_BUILD_WGSL_SUPPORT)
         DOWNLOAD_EXTRACT_TIMESTAMP True
     )
     FetchContent_MakeAvailable(dawn)
-    add_library(tint_c_api STATIC "src/tint_c_api.cpp")
+    add_library(tint_c_api STATIC "${CMAKE_CURRENT_SOURCE_DIR}/src/tint_c_api.cpp")
     target_include_directories(tint_c_api PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
     target_include_directories(tint_c_api PRIVATE "${dawn_SOURCE_DIR}")
+    target_link_libraries(tint_c_api PUBLIC tint_lang_wgsl_reader tint_lang_spirv_writer tint_lang_wgsl_inspector)
     target_compile_features(tint_c_api PRIVATE cxx_std_20)
     if(NOT MSVC)
       target_compile_options(tint_c_api PRIVATE "-fno-rtti")
     endif()
     target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
-    
-    # Bundle wgvk_core and its dependencies into the final `wgvk` library.
-    wgvk_bundle_libraries(wgvk ${WGVK_PRIMARY_TARGET_NAME} tint_lang_wgsl_reader tint_lang_spirv_writer tint_lang_wgsl_inspector tint_c_api)
-
-    # ---- FIX: PROPAGATE USAGE REQUIREMENTS ----
-    # The `wgvk` library is made of object files, so it doesn't inherit CMake
-    # properties from `wgvk_core` automatically.
-    # We use `target_link_libraries` with `INTERFACE` to manually propagate all
-    # PUBLIC/INTERFACE properties (includes, definitions, etc.) from `wgvk_core`
-    # to `wgvk`. This makes them available to anything that links against `wgvk`.
-    target_link_libraries(wgvk INTERFACE ${WGVK_PRIMARY_TARGET_NAME})
-
+    target_link_libraries(${WGVK_PRIMARY_TARGET_NAME} PRIVATE tint_c_api)
 else()
     set(WGVK_PRIMARY_TARGET_NAME "wgvk")
 
-    add_library(${WGVK_PRIMARY_TARGET_NAME} STATIC ${WGVK_CORE_SRC_LIST})
+    add_library(${WGVK_PRIMARY_TARGET_NAME} ${WGVK_CORE_SRC_LIST})
     # When not bundling, `wgvk` is the primary target. We use PUBLIC so that
     # any consumers (like the examples) inherit these properties correctly.
-    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1 WGVK_DISABLE_ASSERT=1)
+    target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC WGVK_DISABLE_ASSERT=1)
     target_include_directories(${WGVK_PRIMARY_TARGET_NAME} PUBLIC include)
+
+    if(NOT BUILD_SHARED_LIBS)
+        target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC RG_STATIC=1)
+    endif()
 endif()
 
 # Now, we apply all remaining properties to the primary target using the variable.
@@ -169,6 +168,21 @@ if(ANDROID)
   target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_ANDROID_SURFACE=1)
 endif()
 
+target_sources(${WGVK_PRIMARY_TARGET_NAME}
+    PUBLIC
+    FILE_SET
+    HEADERS
+    BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+    FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/webgpu/webgpu.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/wgvk.h
+)
+install(
+    TARGETS ${WGVK_PRIMARY_TARGET_NAME}
+    EXPORT wgvk-targets
+    FILE_SET HEADERS
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 if(WGVK_BUILD_EXAMPLES)
     if(NOT EMSCRIPTEN)
@@ -188,7 +202,7 @@ if(WGVK_BUILD_EXAMPLES)
     # Examples always link against the final `wgvk` target. Thanks to the fix above,
     # they will now correctly inherit all necessary compile definitions.
     target_link_libraries(glfw_surface PUBLIC wgvk glfw)
-    target_link_libraries(basic_wgsl_shader PUBLIC wgvk glfw)
+    target_link_libraries(basic_wgsl_shader PUBLIC wgvk glfw m)
     target_link_libraries(raytracing PUBLIC wgvk glfw)
     target_link_libraries(basic_compute PUBLIC wgvk)
     #target_link_libraries(rgfw_surface PUBLIC wgvk Xrandr)
