@@ -5108,6 +5108,18 @@ void wgpuComputePassEncoderSetBindGroup(WGPUComputePassEncoder cpe, uint32_t gro
     };
     cpe->bindGroups[groupIndex] = group;
     
+    for(uint32_t i = 0;i < group->entryCount;i++){
+    const WGPUBindGroupEntry* entry = &group->entries[i];
+        if(entry->buffer){
+            const VkAccessFlags accessFlags = extractVkAccessFlags(group->layout->entries + i);
+            const VkPipelineStageFlags stage = toVulkanPipelineStageBits(group->layout->entries[i].visibility | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            ce_trackBuffer(cpe->cmdEncoder, entry->buffer, (BufferUsageSnap){
+                .stage = stage,
+                .access = accessFlags
+            });
+        }
+    }
+
     ComputePassEncoder_PushCommand(cpe, &insert);
 }
 
@@ -5806,7 +5818,7 @@ static void encoderOptionalBarrierVk(VkCommandBuffer buffer, PFN_vkCmdPipelineBa
     }
     barrier_fn(
         buffer,
-        barrier.srcStage,
+        barrier.srcStage ? barrier.srcStage : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         barrier.dstStage,
         0,
         memoryBarriers, memoryBarrier,

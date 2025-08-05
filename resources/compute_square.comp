@@ -1,0 +1,14 @@
+#version 450 core
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) readonly buffer IB{
+    float inputData[]; 
+};
+layout(std430, binding = 1) writeonly buffer OB{
+    float outputData[]; 
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    outputData[index] = inputData[index] * inputData[index];
+}
