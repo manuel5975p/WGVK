@@ -3315,7 +3315,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                         if(entry->buffer){
                             ce_trackBuffer(destination_->cmdEncoder, entry->buffer, (BufferUsageSnap){
                                 .access = extractVkAccessFlags(group->layout->entries + bglEntryIndex),
-                                .stage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                .stage  = toVulkanPipelineStageBits(group->layout->entries[bglEntryIndex].visibility)
                             });
                         }
                     }
@@ -3331,7 +3331,32 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         }
         break;
         case cp_command_type_dispatch_workgroups_indirect:{
+            for(uint32_t groupIndex = 0;groupIndex < 8;groupIndex++){
+                if(destination_->computeBindGroups[groupIndex]){
+                    const WGPUBindGroup group = destination_->computeBindGroups[groupIndex];
+                    for(uint32_t entryIndex = 0;entryIndex < group->entryCount;entryIndex++){
+                        const WGPUBindGroupEntry* entry = group->entries + entryIndex;
+                        uint32_t bglEntryIndex = 0;
+                        for(;bglEntryIndex < group->layout->entryCount;bglEntryIndex++){
+                            if(group->layout->entries[bglEntryIndex].binding == entry->binding)break;
+                        }
+                        if(entry->buffer){
+                            ce_trackBuffer(destination_->cmdEncoder, entry->buffer, (BufferUsageSnap){
+                                .access = extractVkAccessFlags(group->layout->entries + bglEntryIndex),
+                                .stage  = toVulkanPipelineStageBits(group->layout->entries[bglEntryIndex].visibility)
+                            });
+                        }
+                    }
+                }
+            }
+            
             const ComputePassCommandDispatchWorkgroupsIndirect* dispatch = &command->dispatchWorkgroupsIndirect;
+
+            ce_trackBuffer(destination_->cmdEncoder, dispatch->buffer, (BufferUsageSnap){
+                .access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                .stage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            });
+            
             device->functions.vkCmdDispatchIndirect(
                 destinationVk,
                 dispatch->buffer->buffer,
