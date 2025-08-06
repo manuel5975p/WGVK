@@ -2247,6 +2247,7 @@ typedef struct DefaultDynamicState{
 }DefaultDynamicState;
 
 typedef struct CommandBufferAndSomeState{
+    WGPUCommandEncoder cmdEncoder;
     VkCommandBuffer buffer;
     VkPipelineLayout lastLayout;
     WGPUDevice device;
@@ -2259,7 +2260,7 @@ typedef struct CommandBufferAndSomeState{
 }CommandBufferAndSomeState;
 
 void recordVkCommand(CommandBufferAndSomeState* destination, const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo);
-void recordVkCommands(VkCommandBuffer destination, WGPUDevice device, const RenderPassCommandGenericVector* commands, const RenderPassCommandBegin *beginInfo);
+void recordVkCommands(WGPUCommandEncoder destination, WGPUDevice device, const RenderPassCommandGenericVector* commands, const RenderPassCommandBegin *beginInfo);
 
 typedef struct WGPURenderPassEncoderImpl{
     VkRenderPass renderPass; //ONLY if !dynamicRendering

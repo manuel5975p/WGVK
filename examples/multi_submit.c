@@ -263,6 +263,7 @@ int main(){
     WGPUBindGroupLayoutEntry bglEntries[2] = {
         [0] = {
             .binding = 0,
+            .visibility = WGPUShaderStage_Compute,
             .buffer = {
                 .type = WGPUBufferBindingType_ReadOnlyStorage,
                 .hasDynamicOffset = 0,
@@ -271,6 +272,7 @@ int main(){
         },
         [1] = {
             .binding = 1,
+            .visibility = WGPUShaderStage_Compute,
             .buffer = {
                 .type = WGPUBufferBindingType_Storage,
                 .hasDynamicOffset = 0,

@@ -2936,7 +2936,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
         device->functions.vkCmdSetViewport(destination, i, 1, &viewport);
         device->functions.vkCmdSetScissor (destination, i, 1, &scissor);
     }
-    recordVkCommands(destination, renderPassEncoder->device, &renderPassEncoder->bufferedCommands, beginInfo);
+    recordVkCommands(renderPassEncoder->cmdEncoder, renderPassEncoder->device, &renderPassEncoder->bufferedCommands, beginInfo);
     if(beginInfo->occlusionQuerySet){
         wgpuQuerySetRelease(beginInfo->occlusionQuerySet);
     }
@@ -2994,13 +2994,13 @@ WGPUCommandBuffer wgpuCommandEncoderFinish(WGPUCommandEncoder commandEncoder, co
 }
 
 void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo){
-    VkCommandBuffer destination = destination_->buffer;
+    VkCommandBuffer destinationVk = destination_->buffer;
     WGPUDevice device = destination_->device;
     switch(command->type){
         case rp_command_type_draw_indexed_indirect:{
             const RenderPassCommandDrawIndexedIndirect* drawIndexedIndirect = &command->drawIndexedIndirect;
             device->functions.vkCmdDrawIndexedIndirect(
-                destination,
+                destinationVk,
                 drawIndexedIndirect->indirectBuffer->buffer,
                 drawIndexedIndirect->indirectOffset,
                 1,
@@ -3013,7 +3013,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             
             const RenderPassCommandDrawIndirect* drawIndirect = &command->drawIndirect;
             device->functions.vkCmdDrawIndirect(
-                destination,
+                destinationVk,
                 drawIndirect->indirectBuffer->buffer,
                 drawIndirect->indirectOffset,
                 1,
@@ -3030,7 +3030,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                 (float)setBlendConstant->color.a,
             };
             device->functions.vkCmdSetBlendConstants(
-                destination,
+                destinationVk,
                 buffer
             );
         }
@@ -3048,7 +3048,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                 {vp->x, vp->y, vp->width, vp->height, vp->minDepth, vp->maxDepth},
                 {vp->x, vp->y, vp->width, vp->height, vp->minDepth, vp->maxDepth},
             };
-            device->functions.vkCmdSetViewport(destination, 0, beginInfo->colorAttachmentCount, viewport);
+            device->functions.vkCmdSetViewport(destinationVk, 0, beginInfo->colorAttachmentCount, viewport);
         }break;
         case rp_command_type_set_scissor_rect:{
             const RenderPassCommandSetScissorRect* sr = &command->setScissorRect;
@@ -3063,13 +3063,13 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                 {{sr->x, sr->y}, {sr->width, sr->height}},
                 {{sr->x, sr->y}, {sr->width, sr->height}},
             };
-            device->functions.vkCmdSetScissor(destination, 0, beginInfo->colorAttachmentCount, scissors);
+            device->functions.vkCmdSetScissor(destinationVk, 0, beginInfo->colorAttachmentCount, scissors);
         }break;
 
         case rp_command_type_draw: {
             const RenderPassCommandDraw* draw = &command->draw;
             device->functions.vkCmdDraw(
-                destination, 
+                destinationVk, 
                 draw->vertexCount,
                 draw->instanceCount,
                 draw->firstVertex,
@@ -3080,7 +3080,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case rp_command_type_draw_indexed: {
             const RenderPassCommandDrawIndexed* drawIndexed = &command->drawIndexed;
             device->functions.vkCmdDrawIndexed(
-                destination,
+                destinationVk,
                 drawIndexed->indexCount,
                 drawIndexed->instanceCount,
                 drawIndexed->firstIndex,
@@ -3092,7 +3092,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case rp_command_type_set_vertex_buffer: {
             const RenderPassCommandSetVertexBuffer* setVertexBuffer = &command->setVertexBuffer;
             device->functions.vkCmdBindVertexBuffers(
-                destination,
+                destinationVk,
                 setVertexBuffer->slot,
                 1,
                 &setVertexBuffer->buffer->buffer,
@@ -3103,7 +3103,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case rp_command_type_set_index_buffer: {
             const RenderPassCommandSetIndexBuffer* setIndexBuffer = &command->setIndexBuffer;
             device->functions.vkCmdBindIndexBuffer(
-                destination,
+                destinationVk,
                 setIndexBuffer->buffer->buffer,
                 setIndexBuffer->offset,
                 toVulkanIndexFormat(setIndexBuffer->format)
@@ -3118,7 +3118,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                 destination_->computeBindGroups[setBindGroup->groupIndex] = setBindGroup->group;
             if(destination_->lastLayout){
                 device->functions.vkCmdBindDescriptorSets(
-                    destination,
+                    destinationVk,
                     setBindGroup->bindPoint,
                     destination_->lastLayout,
                     setBindGroup->groupIndex,
@@ -3133,7 +3133,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case rp_command_type_set_render_pipeline: {
             const RenderPassCommandSetPipeline* setRenderPipeline = &command->setRenderPipeline;
             device->functions.vkCmdBindPipeline(
-                destination,
+                destinationVk,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                 setRenderPipeline->pipeline->renderPipeline
             );
@@ -3143,7 +3143,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case rp_command_type_set_raytracing_pipeline: {
             const RenderPassCommandSetRaytracingPipeline* setRaytracingPipeline = &command->setRaytracingPipeline;
             device->functions.vkCmdBindPipeline(
-                destination,
+                destinationVk,
                 VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                 setRaytracingPipeline->pipeline->raytracingPipeline
             );
@@ -3209,7 +3209,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         
             // Dispatch the ray tracing command.
             device->functions.vkCmdTraceRaysKHR(
-                destination,
+                destinationVk,
                 &raygenSbtRegion,
                 &missSbtRegion,
                 &hitSbtRegion,
@@ -3285,14 +3285,14 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             RenderPassCommandBegin dummyBeginInfo = {
                 .colorAttachmentCount = bundle->colorAttachmentCount
             };
-            recordVkCommands(destination, device, &bundle->bufferedCommands, &dummyBeginInfo);
+            recordVkCommands(destination_->cmdEncoder, device, &bundle->bufferedCommands, &dummyBeginInfo);
             #endif
         }break;
         case cp_command_type_set_compute_pipeline: {
             const ComputePassCommandSetPipeline* setComputePipeline = &command->setComputePipeline;
             memset((void*)destination_->computeBindGroups, 0, sizeof(destination_->computeBindGroups));
             device->functions.vkCmdBindPipeline(
-                destination,
+                destinationVk,
                 VK_PIPELINE_BIND_POINT_COMPUTE,
                 setComputePipeline->pipeline->computePipeline
             );
@@ -3303,18 +3303,37 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         case cp_command_type_dispatch_workgroups: {
             const ComputePassCommandDispatchWorkgroups* dispatch = &command->dispatchWorkgroups;
             //ce_trackBuffer(WGPUCommandEncoder encoder, WGPUBuffer buffer, BufferUsageSnap usage)
+            for(uint32_t groupIndex = 0;groupIndex < 8;groupIndex++){
+                if(destination_->computeBindGroups[groupIndex]){
+                    const WGPUBindGroup group = destination_->computeBindGroups[groupIndex];
+                    for(uint32_t entryIndex = 0;entryIndex < group->entryCount;entryIndex++){
+                        const WGPUBindGroupEntry* entry = group->entries + entryIndex;
+                        uint32_t bglEntryIndex = 0;
+                        for(;bglEntryIndex < group->layout->entryCount;bglEntryIndex++){
+                            if(group->layout->entries[bglEntryIndex].binding == entry->binding)break;
+                        }
+                        if(entry->buffer){
+                            ce_trackBuffer(destination_->cmdEncoder, entry->buffer, (BufferUsageSnap){
+                                .access = extractVkAccessFlags(group->layout->entries + bglEntryIndex),
+                                .stage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                            });
+                        }
+                    }
+                }
+            }
             device->functions.vkCmdDispatch(
-                destination, 
+                destinationVk, 
                 dispatch->x, 
                 dispatch->y, 
                 dispatch->z
             );
+            
         }
         break;
         case cp_command_type_dispatch_workgroups_indirect:{
             const ComputePassCommandDispatchWorkgroupsIndirect* dispatch = &command->dispatchWorkgroupsIndirect;
             device->functions.vkCmdDispatchIndirect(
-                destination,
+                destinationVk,
                 dispatch->buffer->buffer,
                 dispatch->offset
             );
@@ -3341,9 +3360,10 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
     }
 }
 
-void recordVkCommands(VkCommandBuffer destination, WGPUDevice device, const RenderPassCommandGenericVector* commands, const RenderPassCommandBegin WGPU_NULLABLE *beginInfo){
+void recordVkCommands(WGPUCommandEncoder destination, WGPUDevice device, const RenderPassCommandGenericVector* commands, const RenderPassCommandBegin WGPU_NULLABLE *beginInfo){
     CommandBufferAndSomeState cal = {
-        .buffer = destination,
+        .cmdEncoder = destination,
+        .buffer = destination->buffer,
         .device = device,
         .lastLayout = VK_NULL_HANDLE,
         .dynamicState.scissorRect = {
@@ -3354,7 +3374,6 @@ void recordVkCommands(VkCommandBuffer destination, WGPUDevice device, const Rend
 
     for(size_t i = 0;i < commands->size;i++){
         const RenderPassCommandGeneric* cmd = RenderPassCommandGenericVector_get((RenderPassCommandGenericVector*)commands, i);
-
         recordVkCommand(&cal, cmd, beginInfo);
     }
 }
@@ -4027,20 +4046,7 @@ void wgpuComputePassEncoderDispatchWorkgroups(WGPUComputePassEncoder cpe, uint32
         .type = cp_command_type_dispatch_workgroups,
         .dispatchWorkgroups = {x, y, z}
     };
-    for(uint32_t groupIndex = 0;groupIndex < 8;groupIndex++){
-        if(cpe->bindGroups[groupIndex]){
-            const WGPUBindGroup group = cpe->bindGroups[groupIndex];
-            for(uint32_t entryIndex = 0;entryIndex < group->entryCount;entryIndex++){
-                const WGPUBindGroupEntry* entry = group->entries + entryIndex;
-                if(entry->buffer){
-                    ce_trackBuffer(cpe->cmdEncoder, entry->buffer, (BufferUsageSnap){
-                        .access = VK_ACCESS_SHADER_WRITE_BIT,
-                        .stage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                    });
-                }
-            }
-        }
-    }
+    
 
     RenderPassCommandGenericVector_push_back(&cpe->bufferedCommands, insert);
 }
@@ -5108,17 +5114,17 @@ void wgpuComputePassEncoderSetBindGroup(WGPUComputePassEncoder cpe, uint32_t gro
     };
     cpe->bindGroups[groupIndex] = group;
     
-    for(uint32_t i = 0;i < group->entryCount;i++){
-    const WGPUBindGroupEntry* entry = &group->entries[i];
-        if(entry->buffer){
-            const VkAccessFlags accessFlags = extractVkAccessFlags(group->layout->entries + i);
-            const VkPipelineStageFlags stage = toVulkanPipelineStageBits(group->layout->entries[i].visibility | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-            ce_trackBuffer(cpe->cmdEncoder, entry->buffer, (BufferUsageSnap){
-                .stage = stage,
-                .access = accessFlags
-            });
-        }
-    }
+    //for(uint32_t i = 0;i < group->entryCount;i++){
+    //    const WGPUBindGroupEntry* entry = &group->entries[i];
+    //    if(entry->buffer){
+    //        const VkAccessFlags accessFlags = extractVkAccessFlags(group->layout->entries + i);
+    //        const VkPipelineStageFlags stage = toVulkanPipelineStageBits(group->layout->entries[i].visibility);
+    //        ce_trackBuffer(cpe->cmdEncoder, entry->buffer, (BufferUsageSnap){
+    //            .stage = stage,
+    //            .access = accessFlags
+    //        });
+    //    }
+    //}
 
     ComputePassEncoder_PushCommand(cpe, &insert);
 }
@@ -5136,7 +5142,7 @@ WGPUComputePassEncoder wgpuCommandEncoderBeginComputePass(WGPUCommandEncoder com
     return ret;
 }
 void wgpuComputePassEncoderEnd(WGPUComputePassEncoder commandEncoder){
-    recordVkCommands(commandEncoder->cmdEncoder->buffer, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
+    recordVkCommands(commandEncoder->cmdEncoder, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
 }
 void wgpuComputePassEncoderRelease(WGPUComputePassEncoder cpenc){
     --cpenc->refCount;
@@ -5176,7 +5182,7 @@ WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncod
 }
 
 void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder commandEncoder){
-    recordVkCommands(commandEncoder->cmdEncoder->buffer, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
+    recordVkCommands(commandEncoder->cmdEncoder, commandEncoder->device, &commandEncoder->bufferedCommands, NULL);
 }
 
 
