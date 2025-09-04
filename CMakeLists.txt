@@ -128,6 +128,7 @@ if(WGVK_BUILD_WGSL_SUPPORT)
     $<$<CXX_COMPILER_ID:GNU>:-fno-rtti>
     $<$<CXX_COMPILER_ID:Clang>:-fno-rtti>
     $<$<CXX_COMPILER_ID:AppleClang>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
     $<$<CXX_COMPILER_ID:MSVC>:/GR->  # disable RTTI in MSVC
   )
   target_compile_definitions(${WGVK_PRIMARY_TARGET_NAME} PUBLIC SUPPORT_WGSL=1)
