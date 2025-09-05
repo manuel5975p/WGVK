@@ -85,6 +85,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+
     - name: Setup MSYS2 (GCC)
       if: matrix.msys2_env && matrix.c_compiler == 'gcc'
       uses: msys2/setup-msys2@v2
@@ -138,7 +144,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DWGVK_USE_VMA=ON
         -DWGVK_BUILD_GLSL_SUPPORT=ON
-        -DWGVK_BUILD_EXAMPLES=OFF
+        -DWGVK_BUILD_EXAMPLES=ON
         -S ${{ steps.msys2_strings.outputs.source-dir }}
 
     - name: Configure CMake (Regular)
@@ -150,7 +156,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DWGVK_USE_VMA=ON
         -DWGVK_BUILD_GLSL_SUPPORT=ON
-        -DWGVK_BUILD_EXAMPLES=OFF
+        -DWGVK_BUILD_EXAMPLES=ON
         -S ${{ github.workspace }}
 
     - name: Build (MSYS2)
