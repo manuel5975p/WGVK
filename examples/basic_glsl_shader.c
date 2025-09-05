@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include <stdlib.h>
+#define _USE_MATH_DEFINES
 #include <math.h>
 
 #include <wgvk_structs_impl.h>
