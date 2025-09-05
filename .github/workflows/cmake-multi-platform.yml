@@ -12,6 +12,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
 
       # Set up a matrix to run the following configurations:
       # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
