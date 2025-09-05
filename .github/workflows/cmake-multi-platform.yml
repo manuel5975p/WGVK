@@ -138,7 +138,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DWGVK_USE_VMA=ON
         -DWGVK_BUILD_GLSL_SUPPORT=ON
-        -DWGVK_BUILD_EXAMPLES=OFF
+        -DWGVK_BUILD_EXAMPLES=ON
         -S ${{ steps.msys2_strings.outputs.source-dir }}
 
     - name: Configure CMake (Regular)
@@ -150,17 +150,17 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DWGVK_USE_VMA=ON
         -DWGVK_BUILD_GLSL_SUPPORT=ON
-        -DWGVK_BUILD_EXAMPLES=OFF
+        -DWGVK_BUILD_EXAMPLES=ON
         -S ${{ github.workspace }}
 
     - name: Build (MSYS2)
       if: matrix.msys2_env
       shell: msys2 {0}
-      run: cmake --build ${{ steps.msys2_strings.outputs.build-output-dir }} --parallel 4
+      run: cmake --build ${{ steps.msys2_strings.outputs.build-output-dir }} --parallel 4 -k
 
     - name: Build (Regular)
       if: '!matrix.msys2_env'
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4 -k
 
     - name: Test (MSYS2)
       if: matrix.msys2_env
