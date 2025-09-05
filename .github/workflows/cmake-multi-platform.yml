@@ -85,6 +85,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev
+
     - name: Setup MSYS2 (GCC)
       if: matrix.msys2_env && matrix.c_compiler == 'gcc'
       uses: msys2/setup-msys2@v2
@@ -156,11 +162,11 @@ jobs:
     - name: Build (MSYS2)
       if: matrix.msys2_env
       shell: msys2 {0}
-      run: cmake --build ${{ steps.msys2_strings.outputs.build-output-dir }} --parallel 4 -k
+      run: cmake --build ${{ steps.msys2_strings.outputs.build-output-dir }} --parallel 4
 
     - name: Build (Regular)
       if: '!matrix.msys2_env'
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4 -k
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
 
     - name: Test (MSYS2)
       if: matrix.msys2_env
