@@ -8262,7 +8262,7 @@ WGPUSurface RGFW_window_createSurface_WebGPU(RGFW_window* window, WGPUInstance i
     fromHwnd.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
     fromHwnd.hwnd = window->src.window; // Get HWND from RGFW window source
     if (!fromHwnd.hwnd) {
-        fprintf(stderr, "RGFW Error: HWND is NULL for Windows window.\n");
+        //fprintf(stderr, "RGFW Error: HWND is NULL for Windows window.\n");
         return NULL;
     }
     fromHwnd.hinstance = GetModuleHandle(NULL); // Get current process HINSTANCE
@@ -9993,7 +9993,7 @@ WGPUSurface RGFW_window_createSurface_WebGPU(RGFW_window* window, WGPUInstance i
 	WGPUSurfaceDescriptor surfaceDesc = {0};
     NSView* nsView = (NSView*)window->src.view;
     if (!nsView) {
-        fprintf(stderr, "RGFW Error: NSView is NULL for macOS window.\n");
+        //fprintf(stderr, "RGFW Error: NSView is NULL for macOS window.\n");
         return NULL;
     }
 
