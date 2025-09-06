@@ -1,3 +1,4 @@
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #ifdef __EMSCRIPTEN__
     #include <webgpu/webgpu.h>

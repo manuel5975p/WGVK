@@ -215,6 +215,15 @@ endif()
 
 if(WGVK_BUILD_EXAMPLES)
   if(NOT EMSCRIPTEN)
+    # Disable OpenGL support completely in GLFW
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    set(GLFW_CLIENT_LIBRARY "none" CACHE STRING "" FORCE)
+    # Prevent GLFW headers from including OpenGL headers
+    set(GLFW_INCLUDE_NONE ON CACHE BOOL "" FORCE)
+    
     FetchContent_Declare(
       glfw
       URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz

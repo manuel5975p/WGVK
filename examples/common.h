@@ -1,5 +1,6 @@
 #ifndef COMMON_H_
 #define COMMON_H_
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <webgpu/webgpu.h>
