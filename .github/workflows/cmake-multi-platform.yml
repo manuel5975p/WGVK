@@ -98,7 +98,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev mesa-vulkan-drivers
 
     - name: Install macOS dependencies
       if: matrix.os == 'macos-latest'
@@ -118,6 +118,7 @@ jobs:
           toolchain:p
           cmake:p
           ninja:p
+          mesa:p
 
     - name: Setup MSYS2 (Clang)
       if: matrix.msys2_env && matrix.c_compiler == 'clang'
@@ -132,6 +133,7 @@ jobs:
           clang:p
           cmake:p
           ninja:p
+          mesa:p
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
@@ -182,15 +184,7 @@ jobs:
       if: '!matrix.msys2_env'
       run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel 4
 
-    - name: Test (MSYS2)
-      if: matrix.msys2_env
+    - name: Test (Ubuntu only)
+      if: matrix.os == 'ubuntu-latest'
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      shell: msys2 {0}
-      run: ctest
-
-    - name: Test (Regular)
-      if: '!matrix.msys2_env'
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest --build-config ${{ matrix.build_type }}
+      run: ctest --build-config ${{ matrix.build_type }} --verbose

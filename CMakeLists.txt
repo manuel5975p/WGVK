@@ -276,3 +276,20 @@ if(WGVK_BUILD_EXAMPLES)
     target_link_libraries(rgfw_surface PUBLIC Xrandr)
   endif()
 endif()
+
+include(CTest)
+enable_testing()
+
+# Add basic_compute as a test
+if(WGVK_BUILD_EXAMPLES)
+  add_test(
+    NAME basic_compute_test
+    COMMAND basic_compute
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  
+  # timeout after 30s to prevent hanging
+  set_tests_properties(basic_compute_test PROPERTIES
+    TIMEOUT 30
+  )
+endif()
