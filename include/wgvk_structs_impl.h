@@ -1,7 +1,7 @@
 #ifndef WGPU_STRUCTS_IMPL_H
 #define WGPU_STRUCTS_IMPL_H
 #define VK_NO_PROTOTYPES
-#include <wgvk.h>
+#include "wgvk.h"
 #include <vulkan/vulkan_core.h>
 #include <external/VmaUsage.h>
 #include <wgvk_config.h>

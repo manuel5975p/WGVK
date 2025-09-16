@@ -303,7 +303,7 @@ install(TARGETS wgvk
 
 # Install headers (excluding vulkan headers)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-  DESTINATION include
+  DESTINATION include/WGVK
   FILES_MATCHING PATTERN "*.h"
   PATTERN "vulkan" EXCLUDE
   PATTERN "vk_video" EXCLUDE
@@ -316,7 +316,7 @@ install(CODE "
 
 This package contains:
 - lib/libwgvk.a: Static library for linking
-- include/: Header files
+- include/WGVK/: Header files
 
 Basic usage:
 gcc your_program.c -I./include -L./lib -lwgvk -o your_program

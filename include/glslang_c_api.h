@@ -2,7 +2,7 @@
 #define GLSLANG_C_API_H
 
 #define SUPPORT_VULKAN_BACKEND 1
-#include <wgvk.h>
+#include "wgvk.h"
 #include <wgvk_structs_impl.h>
 
 #ifndef SPIRV_BLOB_STRUCTS
