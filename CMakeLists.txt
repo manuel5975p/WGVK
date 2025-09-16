@@ -301,10 +301,12 @@ install(TARGETS wgvk
   RUNTIME DESTINATION bin
 )
 
-# Install headers
+# Install headers (excluding vulkan headers)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
   DESTINATION include
   FILES_MATCHING PATTERN "*.h"
+  PATTERN "vulkan" EXCLUDE
+  PATTERN "vk_video" EXCLUDE
 )
 
 # Create a usage README for releases
