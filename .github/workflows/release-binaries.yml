@@ -1,0 +1,196 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            
+          # macOS x86_64
+          - os: macos
+            arch: x86_64
+            runner: macos-13  # Intel
+            target: x86_64-apple-darwin
+            
+          # macOS ARM64
+          - os: macos
+            arch: aarch64
+            runner: macos-latest  # Apple Silicon
+            target: aarch64-apple-darwin
+            
+          # Windows x86_64
+          - os: windows
+            arch: x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wayland-protocols libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev mesa-vulkan-drivers
+
+    - name: Install macOS dependencies
+      if: matrix.os == 'macos'
+      run: |
+        brew install molten-vk
+
+    - name: Set up build environment
+      shell: bash
+      run: |
+        echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        
+    - name: Build release binaries
+      shell: bash
+      run: |
+        ./scripts/release/build.sh
+        
+    - name: Prepare artifacts
+      shell: bash
+      run: |
+        # Create platform-specific archive name
+        REPO_NAME="${{ github.repository }}"
+        REPO_NAME_SHORT="${REPO_NAME##*/}"
+        ARCHIVE_NAME="${REPO_NAME_SHORT}-${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.arch }}"
+        
+        # Determine file extension
+        if [[ "${{ matrix.os }}" == "windows" ]]; then
+          EXTENSION="zip"
+        else
+          EXTENSION="tar.gz"
+        fi
+        
+        FULL_ARCHIVE_NAME="${ARCHIVE_NAME}.${EXTENSION}"
+        
+        # Create archive
+        if [[ "${{ matrix.os }}" == "windows" ]]; then
+          powershell Compress-Archive -Path dist/* -DestinationPath "${FULL_ARCHIVE_NAME}"
+        else
+          tar -czf "${FULL_ARCHIVE_NAME}" -C dist .
+        fi
+        
+        # Save archive name for upload step
+        echo "ARCHIVE_NAME=${FULL_ARCHIVE_NAME}" >> $GITHUB_ENV
+        echo "ARCHIVE_PATH=${PWD}/${FULL_ARCHIVE_NAME}" >> $GITHUB_ENV
+        
+        # Display archive info
+        ls -la "${FULL_ARCHIVE_NAME}"
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.os }}-${{ matrix.arch }}-binaries
+        path: ${{ env.ARCHIVE_PATH }}
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: always() && (needs.build.result == 'success' || contains(needs.build.result, 'success'))
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Set release info
+      shell: bash
+      run: |
+        echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        
+        # Get tag message for release body
+        TAG_MESSAGE=$(git tag -l --format='%(contents)' "${GITHUB_REF#refs/tags/}" | head -20)
+        if [[ -z "$TAG_MESSAGE" ]]; then
+          TAG_MESSAGE="Release ${GITHUB_REF#refs/tags/}"
+        fi
+        
+        # Save to multiline environment variable
+        cat << 'EOF' >> $GITHUB_ENV
+        RELEASE_BODY<<EOL
+        $TAG_MESSAGE
+        
+        ## Platform Binaries
+        
+        Download the appropriate binary for your platform:
+        - **Linux x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64.tar.gz`
+        - **macOS x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-x86_64.tar.gz`
+        - **macOS ARM64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-aarch64.tar.gz`
+        - **Windows x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64.zip`
+        
+        Each archive contains:
+        - `libwgvk.a` - Static library for linking
+        - `include/` - Header files
+        - `README.txt` - Usage instructions
+        
+        ## Quick Start
+        
+        ```bash
+        # Extract the archive
+        tar -xzf WGVK-*.tar.gz  # Linux/macOS
+        # or unzip WGVK-*.zip   # Windows
+        
+        # Compile your program
+        gcc your_program.c -I./include -L. -lwgvk -o your_program
+        ```
+        
+        For more examples and documentation, see the [README](https://github.com/manuel5975p/WGVK/blob/master/README.md).
+        EOL
+        EOF
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+        
+    - name: Prepare release assets
+      shell: bash
+      run: |
+        # List downloaded artifacts
+        find artifacts/ -type f -name "*.tar.gz" -o -name "*.zip" | while read file; do
+          echo "Found artifact: $file"
+          # Move to root and rename properly
+          basename_file=$(basename "$file")
+          mv "$file" "./$basename_file"
+        done
+        
+        # List final assets
+        echo "Release assets:"
+        ls -la *.tar.gz *.zip 2>/dev/null || echo "No archives found"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.RELEASE_TAG }}
+        name: ${{ env.RELEASE_TAG }}
+        body: ${{ env.RELEASE_BODY }}
+        draft: false
+        prerelease: ${{ contains(env.RELEASE_TAG, '-') || contains(env.RELEASE_TAG, 'alpha') || contains(env.RELEASE_TAG, 'beta') || contains(env.RELEASE_TAG, 'rc') }}
+        files: |
+          *.tar.gz
+          *.zip
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

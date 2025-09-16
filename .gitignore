@@ -1,3 +1,10 @@
 build/
+build-*/
 .cache/
 .vscode/
+
+# Release artifacts
+dist/
+artifacts/
+*.tar.gz
+*.zip
