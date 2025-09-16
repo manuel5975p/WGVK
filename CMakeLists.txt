@@ -293,3 +293,33 @@ if(WGVK_BUILD_EXAMPLES)
     TIMEOUT 30
   )
 endif()
+
+# Install targets for release binaries
+install(TARGETS wgvk
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Install headers
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+  DESTINATION include
+  FILES_MATCHING PATTERN "*.h"
+)
+
+# Create a usage README for releases
+install(CODE "
+  file(WRITE \"${CMAKE_INSTALL_PREFIX}/README.txt\" 
+\"WGVK Release Build
+
+This package contains:
+- lib/libwgvk.a: Static library for linking
+- include/: Header files
+
+Basic usage:
+gcc your_program.c -I./include -L./lib -lwgvk -o your_program
+
+For more examples and documentation, visit:
+https://github.com/manuel5975p/WGVK
+\")
+")

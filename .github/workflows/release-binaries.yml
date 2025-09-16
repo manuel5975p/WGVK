@@ -64,7 +64,21 @@ jobs:
     - name: Build release binaries
       shell: bash
       run: |
-        ./scripts/release/build.sh
+        # Configure CMake for release build
+        mkdir -p build-release
+        cmake -B build-release \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DWGVK_BUILD_EXAMPLES=OFF \
+          -DWGVK_USE_VMA=ON \
+          -DWGVK_BUILD_GLSL_SUPPORT=ON \
+          -DWGVK_BUILD_WGSL_SUPPORT=OFF \
+          -DCMAKE_INSTALL_PREFIX=./dist
+        
+        # Build the project
+        cmake --build build-release --config Release --parallel 4
+        
+        # Install to dist directory
+        cmake --install build-release
         
     - name: Prepare artifacts
       shell: bash
