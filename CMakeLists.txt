@@ -143,7 +143,7 @@ if(WGVK_BUILD_GLSL_SUPPORT)
     set(ENABLE_OPT OFF)
     FetchContent_Declare(
       glslang
-      URL https://github.com/KhronosGroup/glslang/archive/refs/tags/15.4.0.tar.gz
+      URL https://github.com/KhronosGroup/glslang/archive/refs/tags/16.0.0.tar.gz
       DOWNLOAD_EXTRACT_TIMESTAMP True
     )
     FetchContent_MakeAvailable(glslang)

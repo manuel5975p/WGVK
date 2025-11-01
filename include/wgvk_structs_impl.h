@@ -2148,6 +2148,7 @@ typedef struct WGPUAdapterImpl{
     refcount_type refCount;
     char cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     char cachedDeviceVendor[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+    char cachedDeviceDescription[512];
     WGPUInstance instance;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties;

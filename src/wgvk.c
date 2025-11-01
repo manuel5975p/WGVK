@@ -1515,15 +1515,409 @@ static inline VkPhysicalDeviceType tvkpdt(WGPUAdapterType atype){
         }break;
     }
 }
-//static inline VkPhysicalDeviceType tvkpdt(AdapterType atype){
-//    switch(atype){
-//        case DISCRETE_GPU: return VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-//        case INTEGRATED_GPU: return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-//        case SOFTWARE_RENDERER: return VK_PHYSICAL_DEVICE_TYPE_CPU;
-//        rg_unreachable();
-//    }
-//    return (VkPhysicalDeviceType)-1;
-//}
+typedef enum PhysicalDeviceArchitecture {
+    PhysicalDeviceArchitecture_Unknown,
+    PhysicalDeviceArchitecture_AMD_GCN1,
+    PhysicalDeviceArchitecture_AMD_GCN2,
+    PhysicalDeviceArchitecture_AMD_GCN3,
+    PhysicalDeviceArchitecture_AMD_GCN4,
+    PhysicalDeviceArchitecture_AMD_GCN5,
+    PhysicalDeviceArchitecture_AMD_RDNA1,
+    PhysicalDeviceArchitecture_AMD_RDNA2,
+    PhysicalDeviceArchitecture_AMD_RDNA3,
+    PhysicalDeviceArchitecture_AMD_RDNA4,
+    PhysicalDeviceArchitecture_AMD_CDNA1,
+    PhysicalDeviceArchitecture_ARM_Midgard,
+    PhysicalDeviceArchitecture_ARM_Bifrost,
+    PhysicalDeviceArchitecture_ARM_Valhall,
+    PhysicalDeviceArchitecture_ARM_Gen5,
+    PhysicalDeviceArchitecture_Broadcom_VideoCore,
+    PhysicalDeviceArchitecture_Google_Swiftshader,
+    PhysicalDeviceArchitecture_ImgTec_Rogue,
+    PhysicalDeviceArchitecture_ImgTec_Furian,
+    PhysicalDeviceArchitecture_ImgTec_Albiorix,
+    PhysicalDeviceArchitecture_Intel_Gen7,
+    PhysicalDeviceArchitecture_Intel_Gen8,
+    PhysicalDeviceArchitecture_Intel_Gen9,
+    PhysicalDeviceArchitecture_Intel_Gen11,
+    PhysicalDeviceArchitecture_Intel_Gen12LP,
+    PhysicalDeviceArchitecture_Intel_Gen12HP,
+    PhysicalDeviceArchitecture_Intel_XeLPG,
+    PhysicalDeviceArchitecture_Intel_Xe2LPG,
+    PhysicalDeviceArchitecture_Intel_Xe2HPG,
+    PhysicalDeviceArchitecture_Intel_Xe3LPG,
+    PhysicalDeviceArchitecture_Mesa_Software,
+    PhysicalDeviceArchitecture_Microsoft_WARP,
+    PhysicalDeviceArchitecture_Nvidia_Fermi,
+    PhysicalDeviceArchitecture_Nvidia_Kepler,
+    PhysicalDeviceArchitecture_Nvidia_Maxwell,
+    PhysicalDeviceArchitecture_Nvidia_Pascal,
+    PhysicalDeviceArchitecture_Nvidia_Turing,
+    PhysicalDeviceArchitecture_Nvidia_Ampere,
+    PhysicalDeviceArchitecture_Nvidia_Lovelace,
+    PhysicalDeviceArchitecture_Nvidia_Blackwell,
+    PhysicalDeviceArchitecture_Nvidia_Volta,
+    PhysicalDeviceArchitecture_QualcommPCI_Adreno4xx,
+    PhysicalDeviceArchitecture_QualcommPCI_Adreno5xx,
+    PhysicalDeviceArchitecture_QualcommPCI_Adreno6xx,
+    PhysicalDeviceArchitecture_QualcommPCI_Adreno7xx,
+    PhysicalDeviceArchitecture_QualcommPCI_Adreno8xx,
+    PhysicalDeviceArchitecture_QualcommACPI_Adreno6xx,
+    PhysicalDeviceArchitecture_QualcommACPI_Adreno7xx,
+    PhysicalDeviceArchitecture_Samsung_RDNA2,
+    PhysicalDeviceArchitecture_Samsung_RDNA3,
+}PhysicalDeviceArchitecture;
+
+
+static const char* PhysicalDeviceArchitecture_ToString(const PhysicalDeviceArchitecture arch) {
+    switch(arch) {
+        case PhysicalDeviceArchitecture_Unknown: return "";
+        case PhysicalDeviceArchitecture_AMD_GCN1: return "gcn-1";
+        case PhysicalDeviceArchitecture_AMD_GCN2: return "gcn-2";
+        case PhysicalDeviceArchitecture_AMD_GCN3: return "gcn-3";
+        case PhysicalDeviceArchitecture_AMD_GCN4: return "gcn-4";
+        case PhysicalDeviceArchitecture_AMD_GCN5: return "gcn-5";
+        case PhysicalDeviceArchitecture_AMD_RDNA1: return "rdna-1";
+        case PhysicalDeviceArchitecture_AMD_RDNA2: return "rdna-2";
+        case PhysicalDeviceArchitecture_AMD_RDNA3: return "rdna-3";
+        case PhysicalDeviceArchitecture_AMD_RDNA4: return "rdna-4";
+        case PhysicalDeviceArchitecture_AMD_CDNA1: return "cdna-1";
+        case PhysicalDeviceArchitecture_ARM_Midgard: return "midgard";
+        case PhysicalDeviceArchitecture_ARM_Bifrost: return "bifrost";
+        case PhysicalDeviceArchitecture_ARM_Valhall: return "valhall";
+        case PhysicalDeviceArchitecture_ARM_Gen5: return "gen-5";
+        case PhysicalDeviceArchitecture_Broadcom_VideoCore: return "videocore";
+        case PhysicalDeviceArchitecture_Google_Swiftshader: return "swiftshader";
+        case PhysicalDeviceArchitecture_ImgTec_Rogue: return "rogue";
+        case PhysicalDeviceArchitecture_ImgTec_Furian: return "furian";
+        case PhysicalDeviceArchitecture_ImgTec_Albiorix: return "albiorix";
+        case PhysicalDeviceArchitecture_Intel_Gen7: return "gen-7";
+        case PhysicalDeviceArchitecture_Intel_Gen8: return "gen-8";
+        case PhysicalDeviceArchitecture_Intel_Gen9: return "gen-9";
+        case PhysicalDeviceArchitecture_Intel_Gen11: return "gen-11";
+        case PhysicalDeviceArchitecture_Intel_Gen12LP: return "gen-12lp";
+        case PhysicalDeviceArchitecture_Intel_Gen12HP: return "gen-12hp";
+        case PhysicalDeviceArchitecture_Intel_XeLPG: return "xe-lpg";
+        case PhysicalDeviceArchitecture_Intel_Xe2LPG: return "xe-2lpg";
+        case PhysicalDeviceArchitecture_Intel_Xe2HPG: return "xe-2hpg";
+        case PhysicalDeviceArchitecture_Intel_Xe3LPG: return "xe-3lpg";
+        case PhysicalDeviceArchitecture_Mesa_Software: return "software";
+        case PhysicalDeviceArchitecture_Microsoft_WARP: return "warp";
+        case PhysicalDeviceArchitecture_Nvidia_Fermi: return "fermi";
+        case PhysicalDeviceArchitecture_Nvidia_Kepler: return "kepler";
+        case PhysicalDeviceArchitecture_Nvidia_Maxwell: return "maxwell";
+        case PhysicalDeviceArchitecture_Nvidia_Pascal: return "pascal";
+        case PhysicalDeviceArchitecture_Nvidia_Turing: return "turing";
+        case PhysicalDeviceArchitecture_Nvidia_Ampere: return "ampere";
+        case PhysicalDeviceArchitecture_Nvidia_Lovelace: return "lovelace";
+        case PhysicalDeviceArchitecture_Nvidia_Blackwell: return "blackwell";
+        case PhysicalDeviceArchitecture_Nvidia_Volta: return "volta";
+        case PhysicalDeviceArchitecture_QualcommPCI_Adreno4xx: return "adreno-4xx";
+        case PhysicalDeviceArchitecture_QualcommPCI_Adreno5xx: return "adreno-5xx";
+        case PhysicalDeviceArchitecture_QualcommPCI_Adreno6xx: return "adreno-6xx";
+        case PhysicalDeviceArchitecture_QualcommPCI_Adreno7xx: return "adreno-7xx";
+        case PhysicalDeviceArchitecture_QualcommPCI_Adreno8xx: return "adreno-8xx";
+        case PhysicalDeviceArchitecture_QualcommACPI_Adreno6xx: return "adreno-6xx";
+        case PhysicalDeviceArchitecture_QualcommACPI_Adreno7xx: return "adreno-7xx";
+        case PhysicalDeviceArchitecture_Samsung_RDNA2: return "rdna-2";
+        case PhysicalDeviceArchitecture_Samsung_RDNA3: return "rdna-3";
+    }
+    return "";
+}
+
+
+#define kVendorID_AMD 0x1002
+#define kVendorID_Apple 0x106b
+#define kVendorID_ARM 0x13B5
+#define kVendorID_Broadcom 0x14e4
+#define kVendorID_Google 0x1AE0
+#define kVendorID_ImgTec 0x1010
+#define kVendorID_Intel 0x8086
+#define kVendorID_Mesa 0x10005
+#define kVendorID_Microsoft 0x1414
+#define kVendorID_Nvidia 0x10DE
+#define kVendorID_QualcommPCI 0x5143
+#define kVendorID_QualcommACPI 0x4D4F4351
+#define kVendorID_Samsung 0x144d
+#define kVendorID_Huawei 0x19e5
+
+PhysicalDeviceArchitecture GetArchitecture(uint32_t vendorId, uint32_t deviceId) {
+    ENTRY();
+    switch(vendorId) {
+        case kVendorID_AMD: {
+            switch (deviceId & 0xFFF0) {
+                case 0x1300:
+                case 0x1310:
+                case 0x6600:
+                case 0x6610:
+                case 0x6660:
+                case 0x6790:
+                case 0x6800:
+                case 0x6810:
+                case 0x6820:
+                case 0x6830:
+                    return PhysicalDeviceArchitecture_AMD_GCN1;
+                case 0x6640:
+                case 0x6650:
+                case 0x67A0:
+                case 0x67B0:
+                case 0x9830:
+                case 0x9850:
+                    return PhysicalDeviceArchitecture_AMD_GCN2;
+                case 0x6900:
+                case 0x6920:
+                case 0x6930:
+                case 0x7300:
+                case 0x9870:
+                case 0x98E0:
+                    return PhysicalDeviceArchitecture_AMD_GCN3;
+                case 0x67C0:
+                case 0x67D0:
+                case 0x67E0:
+                case 0x67F0:
+                case 0x6980:
+                case 0x6990:
+                case 0x6FD0:
+                case 0x9920:
+                    return PhysicalDeviceArchitecture_AMD_GCN4;
+                case 0x66A0:
+                case 0x6860:
+                case 0x6870:
+                case 0x6940:
+                case 0x69A0:
+                case 0x15D0:
+                case 0x1630:
+                    return PhysicalDeviceArchitecture_AMD_GCN5;
+                case 0x7310:
+                case 0x7340:
+                case 0x7360:
+                    return PhysicalDeviceArchitecture_AMD_RDNA1;
+                case 0x73A0:
+                case 0x73B0:
+                case 0x73D0:
+                case 0x73E0:
+                case 0x73F0:
+                case 0x7400:
+                case 0x7420:
+                case 0x7430:
+                case 0x1430:
+                case 0x1500:
+                case 0x15E0:
+                case 0x1640:
+                case 0x1680:
+                case 0x13c0:
+                case 0x13f0:
+                    return PhysicalDeviceArchitecture_AMD_RDNA2;
+                case 0x7440:
+                case 0x7470:
+                case 0x7480:
+                case 0x15B0:
+                case 0x7450:
+                case 0x1900:
+                case 0x1580:
+                case 0x1110:
+                    return PhysicalDeviceArchitecture_AMD_RDNA3;
+                case 0x7550:
+                case 0x7590:
+                    return PhysicalDeviceArchitecture_AMD_RDNA4;
+                case 0x7380:
+                    return PhysicalDeviceArchitecture_AMD_CDNA1;
+            }
+        } break;
+        case kVendorID_ARM: {
+            switch (deviceId & 0xF0000000) {
+                case 0x00000000:
+                    return PhysicalDeviceArchitecture_ARM_Midgard;
+                case 0x60000000:
+                case 0x70000000:
+                    return PhysicalDeviceArchitecture_ARM_Bifrost;
+                case 0x90000000:
+                case 0xA0000000:
+                case 0xB0000000:
+                    return PhysicalDeviceArchitecture_ARM_Valhall;
+                case 0xC0000000:
+                case 0xD0000000:
+                    return PhysicalDeviceArchitecture_ARM_Gen5;
+            }
+        } break;
+        case kVendorID_Broadcom: {
+            switch (deviceId & 0x00000000) {
+                case 0x00000000:
+                    return PhysicalDeviceArchitecture_Broadcom_VideoCore;
+            }
+        } break;
+        case kVendorID_Google: {
+            switch (deviceId) {
+                case 0xC0DE:
+                    return PhysicalDeviceArchitecture_Google_Swiftshader;
+            }
+        } break;
+        case kVendorID_ImgTec: {
+            switch (deviceId & 0xFF000000) {
+                case 0x00000000:
+                case 0x22000000:
+                case 0x24000000:
+                    return PhysicalDeviceArchitecture_ImgTec_Rogue;
+                case 0x1b000000:
+                    return PhysicalDeviceArchitecture_ImgTec_Furian;
+                case 0x35000000:
+                case 0x36000000:
+                    return PhysicalDeviceArchitecture_ImgTec_Albiorix;
+            }
+        } break;
+        case kVendorID_Intel: {
+            switch (deviceId & 0xFF00) {
+                case 0x0100:
+                case 0x0400:
+                case 0x0A00:
+                case 0x0D00:
+                case 0x0F00:
+                    return PhysicalDeviceArchitecture_Intel_Gen7;
+                case 0x1600:
+                case 0x2200:
+                    return PhysicalDeviceArchitecture_Intel_Gen8;
+                case 0x1900:
+                case 0x3100:
+                case 0x3E00:
+                case 0x5A00:
+                case 0x5900:
+                case 0x8700:
+                case 0x9B00:
+                    return PhysicalDeviceArchitecture_Intel_Gen9;
+                case 0x8A00:
+                case 0x4E00:
+                case 0x9800:
+                    return PhysicalDeviceArchitecture_Intel_Gen11;
+                case 0x4600:
+                case 0x4C00:
+                case 0x4900:
+                case 0x9A00:
+                case 0xA700:
+                    return PhysicalDeviceArchitecture_Intel_Gen12LP;
+                case 0x4F00:
+                case 0x5600:
+                    return PhysicalDeviceArchitecture_Intel_Gen12HP;
+                case 0x7D00:
+                case 0xB600:
+                    return PhysicalDeviceArchitecture_Intel_XeLPG;
+                case 0x6400:
+                    return PhysicalDeviceArchitecture_Intel_Xe2LPG;
+                case 0xE200:
+                    return PhysicalDeviceArchitecture_Intel_Xe2HPG;
+                case 0xB000:
+                    return PhysicalDeviceArchitecture_Intel_Xe3LPG;
+            }
+        } break;
+        case kVendorID_Mesa: {
+            switch (deviceId) {
+                case 0x0000:
+                    return PhysicalDeviceArchitecture_Mesa_Software;
+            }
+        } break;
+        case kVendorID_Microsoft: {
+            switch (deviceId) {
+                case 0x8c:
+                    return PhysicalDeviceArchitecture_Microsoft_WARP;
+            }
+        } break;
+        case kVendorID_Nvidia: {
+            switch (deviceId & 0xFFFFFF00) {
+                case 0x0D00:
+                    return PhysicalDeviceArchitecture_Nvidia_Fermi;
+                case 0x0F00:
+                case 0x1000:
+                case 0x1100:
+                case 0x1200:
+                    return PhysicalDeviceArchitecture_Nvidia_Kepler;
+                case 0x1300:
+                case 0x1400:
+                case 0x1600:
+                case 0x1700:
+                    return PhysicalDeviceArchitecture_Nvidia_Maxwell;
+                case 0x1500:
+                case 0x1B00:
+                case 0x1C00:
+                case 0x1D00:
+                    return PhysicalDeviceArchitecture_Nvidia_Pascal;
+                case 0x1E00:
+                case 0x1F00:
+                case 0x2100:
+                    return PhysicalDeviceArchitecture_Nvidia_Turing;
+                case 0x2200:
+                case 0x2400:
+                case 0x2500:
+                case 0x2000:
+                    return PhysicalDeviceArchitecture_Nvidia_Ampere;
+                case 0x2600:
+                case 0x2700:
+                case 0x2800:
+                    return PhysicalDeviceArchitecture_Nvidia_Lovelace;
+                case 0x2b00:
+                case 0x2c00:
+                case 0x2d00:
+                case 0x2f00:
+                    return PhysicalDeviceArchitecture_Nvidia_Blackwell;
+            }
+            switch (deviceId & 0xFF000000) {
+                case 0x1e000000:
+                    return PhysicalDeviceArchitecture_Nvidia_Kepler;
+                case 0x92000000:
+                    return PhysicalDeviceArchitecture_Nvidia_Maxwell;
+                case 0x93000000:
+                    return PhysicalDeviceArchitecture_Nvidia_Pascal;
+                case 0x97000000:
+                    return PhysicalDeviceArchitecture_Nvidia_Ampere;
+                case 0xa5000000:
+                    return PhysicalDeviceArchitecture_Nvidia_Volta;
+            }
+        } break;
+        case kVendorID_QualcommPCI: {
+            switch (deviceId & 0xFF000000) {
+                case 0x04000000:
+                    return PhysicalDeviceArchitecture_QualcommPCI_Adreno4xx;
+                case 0x05000000:
+                    return PhysicalDeviceArchitecture_QualcommPCI_Adreno5xx;
+                case 0x06000000:
+                    return PhysicalDeviceArchitecture_QualcommPCI_Adreno6xx;
+                case 0x07000000:
+                case 0x43000000:
+                case 0x36000000:
+                case 0x37000000:
+                    return PhysicalDeviceArchitecture_QualcommPCI_Adreno7xx;
+                case 0x44000000:
+                    return PhysicalDeviceArchitecture_QualcommPCI_Adreno8xx;
+            }
+        } break;
+        case kVendorID_QualcommACPI: {
+            switch (deviceId & 0xFFFFFF00) {
+                case 0x41333800:
+                case 0x36334100:
+                case 0x41333400:
+                case 0x36333600:
+                    return PhysicalDeviceArchitecture_QualcommACPI_Adreno6xx;
+                case 0x37314400:
+                case 0x36334300:
+                    return PhysicalDeviceArchitecture_QualcommACPI_Adreno7xx;
+            }
+        } break;
+        case kVendorID_Samsung: {
+            switch (deviceId & 0xFFFFFFFF) {
+                case 0x000073A0:
+                case 0x01300100:
+                    return PhysicalDeviceArchitecture_Samsung_RDNA2;
+                case 0x02600200:
+                    return PhysicalDeviceArchitecture_Samsung_RDNA3;
+            }
+        } break;
+        case kVendorID_Huawei: {
+            switch (deviceId & 0xFFFFFFFF) {
+            }
+        } break;
+    }
+    EXIT();
+    return PhysicalDeviceArchitecture_Unknown;
+}
+
 void wgpuCreateAdapter_sync(void* userdata_v){
     ENTRY();
     userdataforcreateadapter* userdata = (userdataforcreateadapter*)userdata_v;
@@ -1618,9 +2012,20 @@ void wgpuCreateAdapter_sync(void* userdata_v){
     wgpuInstanceAddRef(userdata->instance);
     adapter->refCount = 1;
     adapter->physicalDevice = pds[i];
-    VkPhysicalDeviceProperties pdProperties = {0};
-    vkGetPhysicalDeviceProperties(adapter->physicalDevice, &pdProperties);
+    VkPhysicalDeviceDriverProperties driverProperties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES
+    };
+    VkPhysicalDeviceProperties2 pdProperties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &driverProperties,
+    };
+    vkGetPhysicalDeviceProperties2(adapter->physicalDevice, &pdProperties);
     vkGetPhysicalDeviceMemoryProperties(adapter->physicalDevice, &adapter->memProperties);
+
+    char* writePos = adapter->cachedDeviceDescription;
+    int length1 = snprintf(writePos, 511, "%s %s", driverProperties.driverName, driverProperties.driverInfo);
+    writePos += length1;
+
     uint32_t queueFamilyPropertyCount;
 
     vkGetPhysicalDeviceQueueFamilyProperties(adapter->physicalDevice, &queueFamilyPropertyCount, NULL);
@@ -7932,14 +8337,17 @@ WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo* info) {
     strncpy(adapter->cachedDeviceName, deviceProperties2.properties.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     adapter->cachedDeviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] = '\0';
     
-    VkPhysicalDeviceProperties props;
+    VkPhysicalDeviceProperties props = {0};
     vkGetPhysicalDeviceProperties(adapter->physicalDevice, &props);
 
     info->vendorID = props.vendorID;
     info->deviceID = props.deviceID;
     info->device = (WGPUStringView){adapter->cachedDeviceName, WGPU_STRLEN};
-    info->description = (WGPUStringView){"?", 1};
-    info->architecture = (WGPUStringView){"?", 1};
+    info->description = (WGPUStringView){adapter->cachedDeviceDescription, WGPU_STRLEN};
+    info->architecture = (WGPUStringView){
+        .length = WGPU_STRLEN,
+        .data = PhysicalDeviceArchitecture_ToString(GetArchitecture(props.vendorID, props.deviceID)),
+    };
 
     // Map the Vulkan device type to the corresponding WGPU adapter type.
     switch (props.deviceType) {

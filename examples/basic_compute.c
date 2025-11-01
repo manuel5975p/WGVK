@@ -67,6 +67,8 @@ void deviceCallbackFunction(
     *((WGPUDevice*)userdata1) = device;
 }
 
+
+
 void reflectionCallback(WGPUReflectionInfoRequestStatus status, const WGPUReflectionInfo* reflectionInfo, void* userdata1, void* userdata2){
     for(uint32_t i = 0;i < reflectionInfo->globalCount;i++){
 
@@ -127,7 +129,6 @@ int main(){
 
     WGPURequestAdapterOptions adapterOptions = {0};
     adapterOptions.featureLevel = WGPUFeatureLevel_Core;
-
     WGPURequestAdapterCallbackInfo adapterCallback = {0};
     adapterCallback.callback = adapterCallbackFunction;
     WGPUAdapter requestedAdapter;
@@ -141,6 +142,34 @@ int main(){
     };
 
     wgpuInstanceWaitAny(instance, 1, &winfo, ~0ull);
+    
+    
+    WGPUAdapterInfo info = {0};
+    WGPUStatus wgpuAdapterGetInfoStatus = wgpuAdapterGetInfo(requestedAdapter, &info);
+    if(wgpuAdapterGetInfoStatus == WGPUStatus_Success){
+        printf("Got Adapter:\n");
+        switch(info.adapterType){
+            case WGPUAdapterType_DiscreteGPU: printf("  type: Discrete GPU\n");break;
+            case WGPUAdapterType_IntegratedGPU: printf("  type: Integrated GPU\n");break;
+            case WGPUAdapterType_CPU: printf("  type: CPU\n");break;
+            case WGPUAdapterType_Unknown: printf("  type: Unknown\n");break;
+            default: break;
+        }
+        
+        int architectureLength = info.architecture.length == WGPU_STRLEN ? strlen(info.architecture.data) : info.architecture.length;
+        printf("  Architecture: %.*s\n", architectureLength, info.architecture.data);
+        
+        int deviceLength = info.device.length == WGPU_STRLEN ? strlen(info.device.data) : info.device.length;
+        printf("  Name: %.*s\n", deviceLength, info.device.data);
+        
+        int descriptionLength = info.description.length == WGPU_STRLEN ? strlen(info.description.data) : info.description.length;
+        printf("  Description: %.*s\n\n", descriptionLength, info.description.data);
+    }
+    else{
+        printf("wgpuAdapterGetInfoStatus did not return WGPUStatus_Success\n");
+    }
+
+
     WGPUStringView deviceLabel = {"WGPU Device", sizeof("WGPU Device") - 1};
 
     WGPUDeviceDescriptor deviceDescriptor = {
