@@ -1544,32 +1544,73 @@ void wgpuCreateAdapter_sync(void* userdata_v){
         );
         return;
     }
-    uint32_t i = 0;
-    for(i = 0;i < physicalDeviceCount;i++){
-        VkPhysicalDeviceProperties properties zeroinit;
-        vkGetPhysicalDeviceProperties(pds[i], &properties);
-        if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU){
-            break;
-        }
-    }
-    if(i == physicalDeviceCount){
-        i = 0;
-        for(i = 0;i < physicalDeviceCount;i++){
-            VkPhysicalDeviceProperties properties zeroinit;
-            vkGetPhysicalDeviceProperties(pds[i], &properties);
-            if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU){
-                break;
-            }
-        }
-    }
-    if(i == physicalDeviceCount){
-        i = 0;
-        for(i = 0;i < physicalDeviceCount;i++){
-            VkPhysicalDeviceProperties properties zeroinit;
-            vkGetPhysicalDeviceProperties(pds[i], &properties);
+    // Handle forceFallbackAdapter - must find CPU device or fail
+    uint32_t i = physicalDeviceCount;
+    if (userdata->options.forceFallbackAdapter) {
+        for(uint32_t j = 0; j < physicalDeviceCount; j++){
+            VkPhysicalDeviceProperties properties;
+            vkGetPhysicalDeviceProperties(pds[j], &properties);
             if(properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU){
+                i = j;
                 break;
             }
+        }
+        
+        if(i >= physicalDeviceCount) {
+            // No CPU device found - forceFallbackAdapter requires one
+            RL_FREE(pds);
+            const char res[] = "forceFallbackAdapter requested but no CPU device available";
+            userdata->info.callback(
+                WGPURequestAdapterStatus_Unavailable,
+                NULL, CLITERAL(WGPUStringView){
+                    .data = res,
+                    .length = sizeof(res) - 1
+                },
+                userdata->info.userdata1,
+                userdata->info.userdata2
+            );
+            return;
+        }
+    } else {
+        VkPhysicalDeviceType preferenceOrder[3];
+        if (userdata->options.powerPreference == WGPUPowerPreference_LowPower) {
+            // Low power: prefer integrated → discrete → CPU
+            preferenceOrder[0] = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+            preferenceOrder[1] = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+            preferenceOrder[2] = VK_PHYSICAL_DEVICE_TYPE_CPU;
+        } else {
+            // High performance or unspecified: prefer discrete → integrated → CPU
+            preferenceOrder[0] = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+            preferenceOrder[1] = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+            preferenceOrder[2] = VK_PHYSICAL_DEVICE_TYPE_CPU;
+        }
+        
+        // Try to find a GPU matching the preference
+        for(uint32_t p = 0; p < 3 && i >= physicalDeviceCount; p++){
+            for(uint32_t j = 0; j < physicalDeviceCount; j++){
+                VkPhysicalDeviceProperties properties;
+                vkGetPhysicalDeviceProperties(pds[j], &properties);
+                if(properties.deviceType == preferenceOrder[p]){
+                    i = j;
+                    break;
+                }
+            }
+        }
+        
+        // If nothing matched, fail
+        if(i >= physicalDeviceCount) {
+            RL_FREE(pds);
+            const char res[] = "No suitable adapter found matching power preference";
+            userdata->info.callback(
+                WGPURequestAdapterStatus_Unavailable,
+                NULL, CLITERAL(WGPUStringView){
+                    .data = res,
+                    .length = sizeof(res) - 1
+                },
+                userdata->info.userdata1,
+                userdata->info.userdata2
+            );
+            return;
         }
     }
     WGPUAdapter adapter = (WGPUAdapter)RL_CALLOC(1, sizeof(WGPUAdapterImpl));
