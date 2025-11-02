@@ -4578,10 +4578,26 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
             );
         }break;
         case rp_command_type_begin_occlusion_query:{
-
+            const RenderPassCommandBeginOcclusionQuery* beginOcclusionQuery = &command->beginOcclusionQuery;
+            if(beginInfo->occlusionQuerySet){
+                destination_->activeOcclusionQueryIndex = beginOcclusionQuery->queryIndex;
+                device->functions.vkCmdBeginQuery(
+                    destinationVk,
+                    beginInfo->occlusionQuerySet->queryPool,
+                    beginOcclusionQuery->queryIndex,
+                    0 // The only flag Vulkan has is VK_QUERY_CONTROL_PRECISE_BIT
+                    // But WebGPU doesn't offer any way to expose this
+                );
+            }
         }break;
         case rp_command_type_end_occlusion_query:{
-
+            if(beginInfo->occlusionQuerySet){
+                device->functions.vkCmdEndQuery(
+                    destinationVk,
+                    beginInfo->occlusionQuerySet->queryPool,
+                    destination_->activeOcclusionQueryIndex
+                );
+            }
         }break;
         case rp_command_type_insert_debug_marker:{
 

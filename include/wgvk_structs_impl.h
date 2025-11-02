@@ -2422,6 +2422,7 @@ typedef struct CommandBufferAndSomeState{
     WGPUBindGroup computeBindGroups[8];
     WGPURaytracingPipeline lastRaytracingPipeline;
     DefaultDynamicState dynamicState;
+    uint32_t activeOcclusionQueryIndex;
 }CommandBufferAndSomeState;
 
 void recordVkCommand(CommandBufferAndSomeState* destination, const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo);
