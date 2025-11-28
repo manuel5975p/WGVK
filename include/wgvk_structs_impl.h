@@ -3364,6 +3364,8 @@ static inline VkFormat toVulkanPixelFormat(WGPUTextureFormat format) {
         case WGPUTextureFormat_ASTC12x10UnormSrgb:   return VK_FORMAT_ASTC_12x10_SRGB_BLOCK;
         case WGPUTextureFormat_ASTC12x12Unorm:       return VK_FORMAT_ASTC_12x12_UNORM_BLOCK;
         case WGPUTextureFormat_ASTC12x12UnormSrgb:   return VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+        case WGPUTextureFormat_R8BG8Biplanar420Unorm: return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+        case WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm: return VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
         // WGPUTextureFormat_Force32 is a utility, not a real format.
         default:                                     return VK_FORMAT_UNDEFINED;
     }

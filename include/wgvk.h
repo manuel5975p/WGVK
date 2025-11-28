@@ -818,6 +818,8 @@ typedef enum WGPUFeatureName {
     WGPUFeatureName_DualSourceBlending = 0x00000010,
     WGPUFeatureName_Subgroups = 0x00000011,
     WGPUFeatureName_CoreFeaturesAndLimits = 0x00000012,
+    WGPUFeatureName_TextureFormatNV12 = 0x00000013,
+    WGPUFeatureName_TextureFormatP010 = 0x00000014,
     WGPUFeatureName_Force32 = 0x7FFFFFFF
 } WGPUFeatureName;
 

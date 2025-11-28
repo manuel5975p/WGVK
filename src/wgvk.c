@@ -2202,9 +2202,14 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     ENTRY();
     //std::pair<WGPUDevice, WGPUQueue> ret = {0,0};
     
+    int requiresYCbCr = 0;
     for(uint32_t i = 0;i < descriptor->requiredFeatureCount;i++){
         WGPUFeatureName feature = descriptor->requiredFeatures[i];
         switch(feature){
+            case WGPUFeatureName_TextureFormatNV12:
+            case WGPUFeatureName_TextureFormatP010:
+                requiresYCbCr = 1;
+                break;
             default:
             (void)0; 
         }
@@ -2256,6 +2261,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         VK_KHR_SPIRV_1_4_EXTENSION_NAME,                   // "VK_KHR_spirv_1_4" - required for ray tracing shaders
         VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,       // "VK_KHR_shader_float_controls" - required by spirv_1_4
         #endif
+        VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,    // For NV12/P010
     };
     #define deviceExtensionsToLookForCount (sizeof(deviceExtensionsToLookFor) / sizeof(const char*))
     
@@ -2299,6 +2305,11 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         .pNext = &pipelineFeatures,
     };
 
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrFeatures = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+        .samplerYcbcrConversion = requiresYCbCr ? VK_TRUE : VK_FALSE,
+    };
+
     VkPhysicalDeviceVulkan13Features v13features = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &accelerationStructureFeatures,
@@ -2306,8 +2317,13 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     
     VkPhysicalDeviceFeatures2 deviceFeatures = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext =  &v13features
     };
+    if (requiresYCbCr) {
+        ycbcrFeatures.pNext = &v13features;
+        deviceFeatures.pNext = &ycbcrFeatures;
+    } else {
+        deviceFeatures.pNext = &v13features;
+    }
     vkGetPhysicalDeviceFeatures2(adapter->physicalDevice, &deviceFeatures);
     if(pipelineFeatures.rayTracingPipeline == VK_TRUE){
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
@@ -8390,6 +8406,19 @@ void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures* features
         (subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT)) {
         supported_features[count++] = WGPUFeatureName_Subgroups;
     }
+
+    // Check YCbCr support
+    if (adapter->deviceInfoCache.knobs.samplerYCbCrConversionFeatures.samplerYcbcrConversion) {
+        vkGetPhysicalDeviceFormatProperties(adapter->physicalDevice, VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+            supported_features[count++] = WGPUFeatureName_TextureFormatNV12;
+        }
+        vkGetPhysicalDeviceFormatProperties(adapter->physicalDevice, VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16, &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+            supported_features[count++] = WGPUFeatureName_TextureFormatP010;
+        }
+    }
+
     supported_features[count++] = WGPUFeatureName_CoreFeaturesAndLimits;
     features->featureCount = count;
     features->features = RL_CALLOC(count, sizeof(WGPUFeatureName));
