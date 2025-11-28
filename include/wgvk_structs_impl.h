@@ -3275,6 +3275,8 @@ static inline VkFormat toVulkanPixelFormat(WGPUTextureFormat format) {
         case WGPUTextureFormat_R8Sint:               return VK_FORMAT_R8_SINT;
         case WGPUTextureFormat_R16Uint:              return VK_FORMAT_R16_UINT;
         case WGPUTextureFormat_R16Sint:              return VK_FORMAT_R16_SINT;
+        case WGPUTextureFormat_R16Unorm:             return VK_FORMAT_R16_UNORM;
+        case WGPUTextureFormat_R16Snorm:             return VK_FORMAT_R16_SNORM;
         case WGPUTextureFormat_R16Float:             return VK_FORMAT_R16_SFLOAT;
         case WGPUTextureFormat_RG8Unorm:             return VK_FORMAT_R8G8_UNORM;
         case WGPUTextureFormat_RG8Snorm:             return VK_FORMAT_R8G8_SNORM;
@@ -3285,6 +3287,8 @@ static inline VkFormat toVulkanPixelFormat(WGPUTextureFormat format) {
         case WGPUTextureFormat_R32Sint:              return VK_FORMAT_R32_SINT;
         case WGPUTextureFormat_RG16Uint:             return VK_FORMAT_R16G16_UINT;
         case WGPUTextureFormat_RG16Sint:             return VK_FORMAT_R16G16_SINT;
+        case WGPUTextureFormat_RG16Unorm:            return VK_FORMAT_R16G16_UNORM;
+        case WGPUTextureFormat_RG16Snorm:            return VK_FORMAT_R16G16_SNORM;
         case WGPUTextureFormat_RG16Float:            return VK_FORMAT_R16G16_SFLOAT;
         case WGPUTextureFormat_RGBA8Unorm:           return VK_FORMAT_R8G8B8A8_UNORM;
         case WGPUTextureFormat_RGBA8UnormSrgb:       return VK_FORMAT_R8G8B8A8_SRGB;
@@ -3302,6 +3306,8 @@ static inline VkFormat toVulkanPixelFormat(WGPUTextureFormat format) {
         case WGPUTextureFormat_RG32Sint:             return VK_FORMAT_R32G32_SINT;
         case WGPUTextureFormat_RGBA16Uint:           return VK_FORMAT_R16G16B16A16_UINT;
         case WGPUTextureFormat_RGBA16Sint:           return VK_FORMAT_R16G16B16A16_SINT;
+        case WGPUTextureFormat_RGBA16Unorm:          return VK_FORMAT_R16G16B16A16_UNORM;
+        case WGPUTextureFormat_RGBA16Snorm:          return VK_FORMAT_R16G16B16A16_SNORM;
         case WGPUTextureFormat_RGBA16Float:          return VK_FORMAT_R16G16B16A16_SFLOAT;
         case WGPUTextureFormat_RGBA32Float:          return VK_FORMAT_R32G32B32A32_SFLOAT;
         case WGPUTextureFormat_RGBA32Uint:           return VK_FORMAT_R32G32B32A32_UINT;
@@ -3366,6 +3372,11 @@ static inline VkFormat toVulkanPixelFormat(WGPUTextureFormat format) {
         case WGPUTextureFormat_ASTC12x12UnormSrgb:   return VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
         case WGPUTextureFormat_R8BG8Biplanar420Unorm: return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
         case WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm: return VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16;
+        case WGPUTextureFormat_R8BG8A8Triplanar420Unorm: return VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
+        case WGPUTextureFormat_R8BG8Biplanar422Unorm: return VK_FORMAT_G8_B8R8_2PLANE_422_UNORM;
+        case WGPUTextureFormat_R8BG8Biplanar444Unorm: return VK_FORMAT_G8_B8R8_2PLANE_444_UNORM;
+        case WGPUTextureFormat_R10X6BG10X6Biplanar422Unorm: return VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16;
+        case WGPUTextureFormat_R10X6BG10X6Biplanar444Unorm: return VK_FORMAT_G10X6_B10X6R10X6_2PLANE_444_UNORM_3PACK16;
         // WGPUTextureFormat_Force32 is a utility, not a real format.
         default:                                     return VK_FORMAT_UNDEFINED;
     }
@@ -3392,6 +3403,8 @@ static inline WGPUTextureFormat fromVulkanPixelFormat(VkFormat format) {
         case VK_FORMAT_R8_SINT: return WGPUTextureFormat_R8Sint;
         case VK_FORMAT_R16_UINT: return WGPUTextureFormat_R16Uint;
         case VK_FORMAT_R16_SINT: return WGPUTextureFormat_R16Sint;
+        case VK_FORMAT_R16_UNORM: return WGPUTextureFormat_R16Unorm;
+        case VK_FORMAT_R16_SNORM: return WGPUTextureFormat_R16Snorm;
         case VK_FORMAT_R16_SFLOAT: return WGPUTextureFormat_R16Float;
         case VK_FORMAT_R8G8_UNORM: return WGPUTextureFormat_RG8Unorm;
         case VK_FORMAT_R8G8_SNORM: return WGPUTextureFormat_RG8Snorm;
@@ -3402,6 +3415,8 @@ static inline WGPUTextureFormat fromVulkanPixelFormat(VkFormat format) {
         case VK_FORMAT_R32_SINT: return WGPUTextureFormat_R32Sint;
         case VK_FORMAT_R16G16_UINT: return WGPUTextureFormat_RG16Uint;
         case VK_FORMAT_R16G16_SINT: return WGPUTextureFormat_RG16Sint;
+        case VK_FORMAT_R16G16_UNORM: return WGPUTextureFormat_RG16Unorm;
+        case VK_FORMAT_R16G16_SNORM: return WGPUTextureFormat_RG16Snorm;
         case VK_FORMAT_R16G16_SFLOAT: return WGPUTextureFormat_RG16Float;
         case VK_FORMAT_R8G8B8A8_UNORM: return WGPUTextureFormat_RGBA8Unorm;
         case VK_FORMAT_R8G8B8A8_SRGB: return WGPUTextureFormat_RGBA8UnormSrgb;
