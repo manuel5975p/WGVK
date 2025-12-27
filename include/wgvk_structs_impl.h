@@ -2216,6 +2216,8 @@ typedef struct WGPUDeviceImpl{
     WGPUQueue queue;
     size_t submittedFrames;
     WGVKCapabilities capabilities;
+    WGPULimits limits;
+    WGPUExtrasLimits extrasLimits;
     WgvkAllocator builtinAllocator;
     #if USE_VMA_ALLOCATOR == 1
     VmaAllocator allocator;

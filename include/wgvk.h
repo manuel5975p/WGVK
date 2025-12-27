@@ -289,6 +289,7 @@ typedef enum WGPUSType {
     WGPUSType_ShaderSourceGLSL = 0x10000003,
     WGPUSType_PrimitiveLineWidthInfo = 0x10000004,
     WGPUSType_SurfaceSourceDrmPlane = 0x10000005,
+    WGPUSType_ExtrasLimits = 0x10000006,
 }WGPUSType WGPU_ENUM_ATTRIBUTE;
 
 typedef enum WGPUCallbackMode {
@@ -1261,6 +1262,14 @@ typedef struct WGPUFutureWaitInfo {
     WGPUBool32 completed;
 } WGPUFutureWaitInfo;
 
+typedef struct WGPUExtrasLimits {
+    WGPUChainedStruct chain;
+    uint32_t maxStorageBuffersInVertexStage;
+    uint32_t maxStorageTexturesInVertexStage;
+    uint32_t maxStorageBuffersInFragmentStage;
+    uint32_t maxStorageTexturesInFragmentStage;
+} WGPUExtrasLimits;
+
 typedef struct WGPULimits {
     WGPUChainedStruct* nextInChain;
     uint32_t maxTextureDimension1D;
@@ -1294,10 +1303,6 @@ typedef struct WGPULimits {
     uint32_t maxComputeWorkgroupSizeY;
     uint32_t maxComputeWorkgroupSizeZ;
     uint32_t maxComputeWorkgroupsPerDimension;
-    uint32_t maxStorageBuffersInVertexStage;
-    uint32_t maxStorageTexturesInVertexStage;
-    uint32_t maxStorageBuffersInFragmentStage;
-    uint32_t maxStorageTexturesInFragmentStage;
 }WGPULimits;
 
 typedef struct WGPUQueueDescriptor {
