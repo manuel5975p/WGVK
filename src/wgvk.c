@@ -2210,6 +2210,85 @@ typedef struct userdataforcreatedevice{
     WGPURequestDeviceCallbackInfo callbackInfo;
 }userdataforcreatedevice;
 
+// Helper function to check if a value is a power of 2
+static inline int is_power_of_2(uint32_t value) {
+    return value != 0 && (value & (value - 1)) == 0;
+}
+
+// Validate requested limits against adapter's supported limits
+// Returns NULL if valid, or an error message string if invalid
+static const char* validate_required_limits(const WGPULimits* required, const WGPULimits* supported,
+                                           const WGPUExtrasLimits* requiredExtras, const WGPUExtrasLimits* supportedExtras) {
+    // Check "maximum" class limits (higher is better, requested must be <= supported)
+    #define CHECK_MAX_LIMIT(field) \
+        if (required->field > supported->field) { \
+            return "Required limit " #field " exceeds adapter capabilities"; \
+        }
+    
+    CHECK_MAX_LIMIT(maxTextureDimension1D);
+    CHECK_MAX_LIMIT(maxTextureDimension2D);
+    CHECK_MAX_LIMIT(maxTextureDimension3D);
+    CHECK_MAX_LIMIT(maxTextureArrayLayers);
+    CHECK_MAX_LIMIT(maxBindGroups);
+    CHECK_MAX_LIMIT(maxBindGroupsPlusVertexBuffers);
+    CHECK_MAX_LIMIT(maxBindingsPerBindGroup);
+    CHECK_MAX_LIMIT(maxDynamicUniformBuffersPerPipelineLayout);
+    CHECK_MAX_LIMIT(maxDynamicStorageBuffersPerPipelineLayout);
+    CHECK_MAX_LIMIT(maxSampledTexturesPerShaderStage);
+    CHECK_MAX_LIMIT(maxSamplersPerShaderStage);
+    CHECK_MAX_LIMIT(maxStorageBuffersPerShaderStage);
+    CHECK_MAX_LIMIT(maxStorageTexturesPerShaderStage);
+    CHECK_MAX_LIMIT(maxUniformBuffersPerShaderStage);
+    CHECK_MAX_LIMIT(maxUniformBufferBindingSize);
+    CHECK_MAX_LIMIT(maxStorageBufferBindingSize);
+    CHECK_MAX_LIMIT(maxVertexBuffers);
+    CHECK_MAX_LIMIT(maxBufferSize);
+    CHECK_MAX_LIMIT(maxVertexAttributes);
+    CHECK_MAX_LIMIT(maxVertexBufferArrayStride);
+    CHECK_MAX_LIMIT(maxInterStageShaderVariables);
+    CHECK_MAX_LIMIT(maxColorAttachments);
+    CHECK_MAX_LIMIT(maxColorAttachmentBytesPerSample);
+    CHECK_MAX_LIMIT(maxComputeWorkgroupStorageSize);
+    CHECK_MAX_LIMIT(maxComputeInvocationsPerWorkgroup);
+    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeX);
+    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeY);
+    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeZ);
+    CHECK_MAX_LIMIT(maxComputeWorkgroupsPerDimension);
+    
+    #undef CHECK_MAX_LIMIT
+    
+    // Check "alignment" class limits (lower is better, requested must be >= supported and power of 2)
+    #define CHECK_ALIGN_LIMIT(field) \
+        if (required->field < supported->field) { \
+            return "Required limit " #field " is stricter than adapter capabilities"; \
+        } \
+        if (!is_power_of_2(required->field)) { \
+            return "Required limit " #field " must be a power of 2"; \
+        }
+    
+    CHECK_ALIGN_LIMIT(minUniformBufferOffsetAlignment);
+    CHECK_ALIGN_LIMIT(minStorageBufferOffsetAlignment);
+    
+    #undef CHECK_ALIGN_LIMIT
+    
+    // Check extras limits if both are present
+    if (requiredExtras && supportedExtras) {
+        if (requiredExtras->maxStorageBuffersInVertexStage > supportedExtras->maxStorageBuffersInVertexStage) {
+            return "Required limit maxStorageBuffersInVertexStage exceeds adapter capabilities";
+        }
+        if (requiredExtras->maxStorageTexturesInVertexStage > supportedExtras->maxStorageTexturesInVertexStage) {
+            return "Required limit maxStorageTexturesInVertexStage exceeds adapter capabilities";
+        }
+        if (requiredExtras->maxStorageBuffersInFragmentStage > supportedExtras->maxStorageBuffersInFragmentStage) {
+            return "Required limit maxStorageBuffersInFragmentStage exceeds adapter capabilities";
+        }
+        if (requiredExtras->maxStorageTexturesInFragmentStage > supportedExtras->maxStorageTexturesInFragmentStage) {
+            return "Required limit maxStorageTexturesInFragmentStage exceeds adapter capabilities";
+        }
+    }
+    
+    return NULL; // All checks passed
+}
 
 WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descriptor){
     ENTRY();
@@ -2386,26 +2465,53 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     retDevice->capabilities.shaderDeviceAddress = deviceFeaturesAddressKhr.bufferDeviceAddress;
     retDevice->uncapturedErrorCallbackInfo = descriptor->uncapturedErrorCallbackInfo;
 
-    retDevice->limits.nextInChain = (WGPUChainedStruct*)&retDevice->extrasLimits;
-    retDevice->extrasLimits.chain.sType = WGPUSType_ExtrasLimits;
-    retDevice->extrasLimits.chain.next = NULL;
-    wgpuAdapterGetLimits(adapter, &retDevice->limits);
-    retDevice->limits.nextInChain = NULL; // Clear the chain pointer after population
+    // Get adapter's supported limits
+    WGPULimits adapterLimits = {0};
+    WGPUExtrasLimits adapterExtrasLimits = {0};
+    adapterLimits.nextInChain = (WGPUChainedStruct*)&adapterExtrasLimits;
+    adapterExtrasLimits.chain.sType = WGPUSType_ExtrasLimits;
+    adapterExtrasLimits.chain.next = NULL;
+    wgpuAdapterGetLimits(adapter, &adapterLimits);
+    adapterLimits.nextInChain = NULL;
 
+    // Validate requiredLimits if provided
     if(descriptor->requiredLimits){
-        retDevice->limits = *descriptor->requiredLimits;
-        retDevice->limits.nextInChain = NULL;
-        
+        WGPUExtrasLimits* reqExtras = NULL;
         WGPUChainedStruct* chain = descriptor->requiredLimits->nextInChain;
         while(chain){
             if(chain->sType == WGPUSType_ExtrasLimits){
-                WGPUExtrasLimits* reqExtras = (WGPUExtrasLimits*)chain;
-                retDevice->extrasLimits = *reqExtras;
+                reqExtras = (WGPUExtrasLimits*)chain;
                 break;
             }
             chain = chain->next;
         }
+        
+        const char* error = validate_required_limits(descriptor->requiredLimits, &adapterLimits, 
+                                                     reqExtras, &adapterExtrasLimits);
+        if(error){
+            TRACELOG(WGPU_LOG_ERROR, "Device creation failed: %s", error);
+            // Clean up and return NULL
+            retDevice->functions.vkDestroyDevice(retDevice->device, NULL);
+            RL_FREE(retDevice);
+            RL_FREE(retQueue);
+            RL_FREE(deprops);
+            return NULL;
+        }
+        
+        // Limits validated, now set them on the device
+        retDevice->limits = *descriptor->requiredLimits;
+        retDevice->limits.nextInChain = NULL;
+        if(reqExtras){
+            retDevice->extrasLimits = *reqExtras;
+        }
+    } else {
+        // No required limits, use adapter's limits
+        retDevice->limits = adapterLimits;
+        retDevice->limits.nextInChain = NULL;
+        retDevice->extrasLimits = adapterExtrasLimits;
     }
+    retDevice->extrasLimits.chain.sType = WGPUSType_ExtrasLimits;
+    retDevice->extrasLimits.chain.next = NULL;
 
     // Retrieve and assign queues
     
