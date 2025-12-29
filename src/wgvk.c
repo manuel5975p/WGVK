@@ -2210,86 +2210,6 @@ typedef struct userdataforcreatedevice{
     WGPURequestDeviceCallbackInfo callbackInfo;
 }userdataforcreatedevice;
 
-// Helper function to check if a value is a power of 2
-static inline int is_power_of_2(uint32_t value) {
-    return value != 0 && (value & (value - 1)) == 0;
-}
-
-// Validate requested limits against adapter's supported limits
-// Returns NULL if valid, or an error message string if invalid
-static const char* validate_required_limits(const WGPULimits* required, const WGPULimits* supported,
-                                           const WGPUExtrasLimits* requiredExtras, const WGPUExtrasLimits* supportedExtras) {
-    // Check "maximum" class limits (higher is better, requested must be <= supported)
-    #define CHECK_MAX_LIMIT(field) \
-        if (required->field > supported->field) { \
-            return "Required limit " #field " exceeds adapter capabilities"; \
-        }
-    
-    CHECK_MAX_LIMIT(maxTextureDimension1D);
-    CHECK_MAX_LIMIT(maxTextureDimension2D);
-    CHECK_MAX_LIMIT(maxTextureDimension3D);
-    CHECK_MAX_LIMIT(maxTextureArrayLayers);
-    CHECK_MAX_LIMIT(maxBindGroups);
-    CHECK_MAX_LIMIT(maxBindGroupsPlusVertexBuffers);
-    CHECK_MAX_LIMIT(maxBindingsPerBindGroup);
-    CHECK_MAX_LIMIT(maxDynamicUniformBuffersPerPipelineLayout);
-    CHECK_MAX_LIMIT(maxDynamicStorageBuffersPerPipelineLayout);
-    CHECK_MAX_LIMIT(maxSampledTexturesPerShaderStage);
-    CHECK_MAX_LIMIT(maxSamplersPerShaderStage);
-    CHECK_MAX_LIMIT(maxStorageBuffersPerShaderStage);
-    CHECK_MAX_LIMIT(maxStorageTexturesPerShaderStage);
-    CHECK_MAX_LIMIT(maxUniformBuffersPerShaderStage);
-    CHECK_MAX_LIMIT(maxUniformBufferBindingSize);
-    CHECK_MAX_LIMIT(maxStorageBufferBindingSize);
-    CHECK_MAX_LIMIT(maxVertexBuffers);
-    CHECK_MAX_LIMIT(maxBufferSize);
-    CHECK_MAX_LIMIT(maxVertexAttributes);
-    CHECK_MAX_LIMIT(maxVertexBufferArrayStride);
-    CHECK_MAX_LIMIT(maxInterStageShaderVariables);
-    CHECK_MAX_LIMIT(maxColorAttachments);
-    CHECK_MAX_LIMIT(maxColorAttachmentBytesPerSample);
-    CHECK_MAX_LIMIT(maxComputeWorkgroupStorageSize);
-    CHECK_MAX_LIMIT(maxComputeInvocationsPerWorkgroup);
-    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeX);
-    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeY);
-    CHECK_MAX_LIMIT(maxComputeWorkgroupSizeZ);
-    CHECK_MAX_LIMIT(maxComputeWorkgroupsPerDimension);
-    
-    #undef CHECK_MAX_LIMIT
-    
-    // Check "alignment" class limits (lower is better, requested must be >= supported and power of 2)
-    #define CHECK_ALIGN_LIMIT(field) \
-        if (required->field < supported->field) { \
-            return "Required limit " #field " is stricter than adapter capabilities"; \
-        } \
-        if (!is_power_of_2(required->field)) { \
-            return "Required limit " #field " must be a power of 2"; \
-        }
-    
-    CHECK_ALIGN_LIMIT(minUniformBufferOffsetAlignment);
-    CHECK_ALIGN_LIMIT(minStorageBufferOffsetAlignment);
-    
-    #undef CHECK_ALIGN_LIMIT
-    
-    // Check extras limits if both are present
-    if (requiredExtras && supportedExtras) {
-        if (requiredExtras->maxStorageBuffersInVertexStage > supportedExtras->maxStorageBuffersInVertexStage) {
-            return "Required limit maxStorageBuffersInVertexStage exceeds adapter capabilities";
-        }
-        if (requiredExtras->maxStorageTexturesInVertexStage > supportedExtras->maxStorageTexturesInVertexStage) {
-            return "Required limit maxStorageTexturesInVertexStage exceeds adapter capabilities";
-        }
-        if (requiredExtras->maxStorageBuffersInFragmentStage > supportedExtras->maxStorageBuffersInFragmentStage) {
-            return "Required limit maxStorageBuffersInFragmentStage exceeds adapter capabilities";
-        }
-        if (requiredExtras->maxStorageTexturesInFragmentStage > supportedExtras->maxStorageTexturesInFragmentStage) {
-            return "Required limit maxStorageTexturesInFragmentStage exceeds adapter capabilities";
-        }
-    }
-    
-    return NULL; // All checks passed
-}
-
 WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descriptor){
     ENTRY();
     //std::pair<WGPUDevice, WGPUQueue> ret = {0,0};
@@ -2486,10 +2406,88 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
             chain = chain->next;
         }
         
-        const char* error = validate_required_limits(descriptor->requiredLimits, &adapterLimits, 
-                                                     reqExtras, &adapterExtrasLimits);
-        if(error){
-            TRACELOG(WGPU_LOG_ERROR, "Device creation failed: %s", error);
+        // Check all limits and collect errors
+        int hasError = 0;
+        const WGPULimits* required = descriptor->requiredLimits;
+        const WGPULimits* supported = &adapterLimits;
+        
+        #define CHECK_MAX_LIMIT(field) \
+            if (required->field > supported->field) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%llu) exceeds adapter capabilities (%llu)", \
+                         (unsigned long long)required->field, (unsigned long long)supported->field); \
+                hasError = 1; \
+            }
+        
+        CHECK_MAX_LIMIT(maxTextureDimension1D);
+        CHECK_MAX_LIMIT(maxTextureDimension2D);
+        CHECK_MAX_LIMIT(maxTextureDimension3D);
+        CHECK_MAX_LIMIT(maxTextureArrayLayers);
+        CHECK_MAX_LIMIT(maxBindGroups);
+        CHECK_MAX_LIMIT(maxBindGroupsPlusVertexBuffers);
+        CHECK_MAX_LIMIT(maxBindingsPerBindGroup);
+        CHECK_MAX_LIMIT(maxDynamicUniformBuffersPerPipelineLayout);
+        CHECK_MAX_LIMIT(maxDynamicStorageBuffersPerPipelineLayout);
+        CHECK_MAX_LIMIT(maxSampledTexturesPerShaderStage);
+        CHECK_MAX_LIMIT(maxSamplersPerShaderStage);
+        CHECK_MAX_LIMIT(maxStorageBuffersPerShaderStage);
+        CHECK_MAX_LIMIT(maxStorageTexturesPerShaderStage);
+        CHECK_MAX_LIMIT(maxUniformBuffersPerShaderStage);
+        CHECK_MAX_LIMIT(maxUniformBufferBindingSize);
+        CHECK_MAX_LIMIT(maxStorageBufferBindingSize);
+        CHECK_MAX_LIMIT(maxVertexBuffers);
+        CHECK_MAX_LIMIT(maxBufferSize);
+        CHECK_MAX_LIMIT(maxVertexAttributes);
+        CHECK_MAX_LIMIT(maxVertexBufferArrayStride);
+        CHECK_MAX_LIMIT(maxInterStageShaderVariables);
+        CHECK_MAX_LIMIT(maxColorAttachments);
+        CHECK_MAX_LIMIT(maxColorAttachmentBytesPerSample);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupStorageSize);
+        CHECK_MAX_LIMIT(maxComputeInvocationsPerWorkgroup);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeX);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeY);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupSizeZ);
+        CHECK_MAX_LIMIT(maxComputeWorkgroupsPerDimension);
+        
+        #undef CHECK_MAX_LIMIT
+        
+        // Check alignment limits (lower is better, must be >= supported and power of 2)
+        #define IS_POWER_OF_2(x) ((x) != 0 && ((x) & ((x) - 1)) == 0)
+        
+        #define CHECK_ALIGNMENT_LIMIT(field) \
+            if (!IS_POWER_OF_2(required->field)) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) must be a power of 2", \
+                         required->field); \
+                hasError = 1; \
+            } else if (required->field < supported->field) { \
+                TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) is stricter than adapter capabilities (%u)", \
+                         required->field, supported->field); \
+                hasError = 1; \
+            }
+        
+        CHECK_ALIGNMENT_LIMIT(minUniformBufferOffsetAlignment);
+        CHECK_ALIGNMENT_LIMIT(minStorageBufferOffsetAlignment);
+        
+        #undef CHECK_ALIGNMENT_LIMIT
+        #undef IS_POWER_OF_2
+        
+        // Check extras limits if both are present
+        if (reqExtras) {
+            #define CHECK_EXTRAS_LIMIT(field) \
+                if (reqExtras->field > adapterExtrasLimits.field) { \
+                    TRACELOG(WGPU_LOG_ERROR, "Required limit " #field " (%u) exceeds adapter capabilities (%u)", \
+                             reqExtras->field, adapterExtrasLimits.field); \
+                    hasError = 1; \
+                }
+            
+            CHECK_EXTRAS_LIMIT(maxStorageBuffersInVertexStage);
+            CHECK_EXTRAS_LIMIT(maxStorageTexturesInVertexStage);
+            CHECK_EXTRAS_LIMIT(maxStorageBuffersInFragmentStage);
+            CHECK_EXTRAS_LIMIT(maxStorageTexturesInFragmentStage);
+            
+            #undef CHECK_EXTRAS_LIMIT
+        }
+        
+        if(hasError){
             // Clean up and return NULL
             retDevice->functions.vkDestroyDevice(retDevice->device, NULL);
             RL_FREE(retDevice);
