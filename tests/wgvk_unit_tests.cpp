@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
@@ -572,6 +573,332 @@ TEST_F(WebGPUTest, BufferCopyRoundTrip) {
     wgpuBufferRelease(dstBuffer);
 }
 
+TEST_F(WebGPUTest, RenderPassClearToRed) {
+    // 64 pixels width * 4 bytes = 256 bytes per row (WebGPU requirement aligned)
+    const uint32_t width = 64;
+    const uint32_t height = 64;
+    const uint32_t bytesPerRow = 256; 
+    const size_t bufferSize = bytesPerRow * height;
+
+    // 1. Create Texture (Render Attachment + Copy Source)
+    WGPUTextureDescriptor texDesc = {};
+    texDesc.size = {width, height, 1};
+    texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount = 1;
+    texDesc.dimension = WGPUTextureDimension_2D;
+    texDesc.label = { "ColorAttachment", 15 };
+    
+    WGPUTexture texture = wgpuDeviceCreateTexture(device, &texDesc);
+    ASSERT_NE(texture, nullptr);
+
+    // 2. Create Default View
+    WGPUTextureView view = wgpuTextureCreateView(texture, nullptr); 
+    ASSERT_NE(view, nullptr);
+
+    // 3. Create Readback Buffer
+    WGPUBufferDescriptor bufDesc = {};
+    bufDesc.size = bufferSize;
+    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    bufDesc.mappedAtCreation = false;
+    bufDesc.label = { "ReadbackBuffer", 14 };
+    
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(device, &bufDesc);
+    ASSERT_NE(buffer, nullptr);
+
+    // 4. Encode Render Pass
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    
+    WGPURenderPassColorAttachment colorAtt = {};
+    colorAtt.view = view;
+    colorAtt.loadOp = WGPULoadOp_Clear;
+    colorAtt.storeOp = WGPUStoreOp_Store;
+    colorAtt.clearValue = {1.0, 0.0, 0.0, 1.0}; // RED
+    
+    WGPURenderPassDescriptor rpDesc = {};
+    rpDesc.colorAttachmentCount = 1;
+    rpDesc.colorAttachments = &colorAtt;
+    rpDesc.depthStencilAttachment = nullptr; // No depth
+    
+    WGPURenderPassEncoder rp = wgpuCommandEncoderBeginRenderPass(encoder, &rpDesc);
+    wgpuRenderPassEncoderEnd(rp);
+    wgpuRenderPassEncoderRelease(rp);
+
+    // 5. Encode Copy (Texture -> Buffer)
+    WGPUTexelCopyTextureInfo srcInfo = {};
+    srcInfo.texture = texture;
+    srcInfo.mipLevel = 0;
+    srcInfo.origin = {0, 0, 0};
+    srcInfo.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferInfo dstInfo = {};
+    dstInfo.buffer = buffer;
+    dstInfo.layout.offset = 0;
+    dstInfo.layout.bytesPerRow = bytesPerRow;
+    dstInfo.layout.rowsPerImage = height;
+
+    WGPUExtent3D copySize = {width, height, 1};
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &srcInfo, &dstInfo, &copySize);
+
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuCommandEncoderRelease(encoder);
+
+    // 6. Submit
+    wgpuQueueSubmit(queue, 1, &cmd);
+    
+    // RefCount Check:
+    // Texture should be held by: 
+    // 1. User (test variable)
+    // 2. View (internal ref)
+    // 3. Command Buffer/Resource Usage tracking (pending execution)
+    EXPECT_GE(texture->refCount, 3); 
+    
+    wgpuCommandBufferRelease(cmd);
+
+    // 7. Map Async & Verify
+    struct MapCtx { bool done = false; WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Error; } mapCtx;
+    auto mapCb = [](WGPUMapAsyncStatus status, WGPUStringView, void* ud, void*) {
+        ((MapCtx*)ud)->status = status;
+        ((MapCtx*)ud)->done = true;
+    };
+    WGPUBufferMapCallbackInfo cbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
+    
+    WGPUFuture mapFut = wgpuBufferMapAsync(buffer, WGPUMapMode_Read, 0, bufferSize, cbInfo);
+    
+    WGPUFutureWaitInfo fwi = { mapFut, 0 };
+    while(!mapCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT64_MAX);
+    }
+    ASSERT_EQ(mapCtx.status, WGPUMapAsyncStatus_Success);
+
+    const uint8_t* mappedData = (const uint8_t*)wgpuBufferGetConstMappedRange(buffer, 0, bufferSize);
+    ASSERT_NE(mappedData, nullptr);
+
+    // Verify Red pixels [255, 0, 0, 255]
+    auto checkPixel = [&](uint32_t x, uint32_t y) {
+        size_t offset = y * bytesPerRow + x * 4;
+        EXPECT_EQ(mappedData[offset + 0], 255) << "Red mismatch at " << x << "," << y;
+        EXPECT_EQ(mappedData[offset + 1], 0)   << "Green mismatch at " << x << "," << y;
+        EXPECT_EQ(mappedData[offset + 2], 0)   << "Blue mismatch at " << x << "," << y;
+        EXPECT_EQ(mappedData[offset + 3], 255) << "Alpha mismatch at " << x << "," << y;
+    };
+
+    checkPixel(0, 0);
+    checkPixel(width - 1, 0);
+    checkPixel(0, height - 1);
+    checkPixel(width - 1, height - 1);
+    checkPixel(width / 2, height / 2);
+
+    wgpuBufferUnmap(buffer);
+
+    // 8. Cleanup & Final Ref Check
+    // Cycle frames to release internal references held by the queue
+    for(uint32_t i = 0;i < framesInFlight;i++){
+        wgpuDeviceTick(device);
+    }
+    
+    // Texture should now only be held by User(1) + View(1) = 2
+    EXPECT_EQ(texture->refCount, 2);
+    // View held by User(1)
+    EXPECT_EQ(view->refCount, 1);
+    // Buffer held by User(1)
+    EXPECT_EQ(buffer->refCount, 1);
+
+    wgpuTextureViewRelease(view);
+    
+    // View released its hold on Texture, now RefCount = 1
+    EXPECT_EQ(texture->refCount, 1);
+    
+    wgpuTextureRelease(texture);
+    wgpuBufferRelease(buffer);
+}
+
+TEST_F(WebGPUTest, RenderPassTriangleDraw) {
+    const uint32_t width = 64;
+    const uint32_t height = 64;
+    const uint32_t bytesPerRow = 256; 
+    const size_t bufferSize = bytesPerRow * height;
+
+    // 1. Setup Shaders
+    // Triangle covering Top-Left, Bottom-Left, Bottom-Right (in 0..64 screen coords)
+    // Conceptually covers the area where y >= x
+    const char* vsCode = R"(
+        #version 450
+        void main() {
+            const vec2 pos[3] = vec2[3](
+                vec2(-1.0, -1.0), // Bottom Left (NDCS) -> Bottom Left (Screen)
+                vec2( 1.0, -1.0), // Bottom Right (NDCS) -> Bottom Right (Screen)
+                vec2(-1.0,  1.0)  // Top Left (NDCS) -> Top Left (Screen)
+            );
+            // Use z = 0.5 to avoid near/far clipping issues
+            gl_Position = vec4(pos[gl_VertexIndex], 0.5, 1.0);
+        }
+    )";
+
+    const char* fsCode = R"(
+        #version 450
+        layout(location = 0) out vec4 outColor;
+        void main() {
+            outColor = vec4(0.0, 1.0, 0.0, 1.0); // Green
+        }
+    )";
+
+    WGPUShaderSourceGLSL vsSource = {};
+    vsSource.chain.sType = WGPUSType_ShaderSourceGLSL;
+    vsSource.stage = WGPUShaderStage_Vertex;
+    vsSource.code.data = vsCode;
+    vsSource.code.length = strlen(vsCode);
+    WGPUShaderModuleDescriptor vsDesc = {};
+    vsDesc.nextInChain = (WGPUChainedStruct*)&vsSource;
+    WGPUShaderModule vsModule = wgpuDeviceCreateShaderModule(device, &vsDesc);
+    ASSERT_NE(vsModule, nullptr);
+
+    WGPUShaderSourceGLSL fsSource = {};
+    fsSource.chain.sType = WGPUSType_ShaderSourceGLSL;
+    fsSource.stage = WGPUShaderStage_Fragment;
+    fsSource.code.data = fsCode;
+    fsSource.code.length = strlen(fsCode);
+    WGPUShaderModuleDescriptor fsDesc = {};
+    fsDesc.nextInChain = (WGPUChainedStruct*)&fsSource;
+    WGPUShaderModule fsModule = wgpuDeviceCreateShaderModule(device, &fsDesc);
+    ASSERT_NE(fsModule, nullptr);
+
+    // 2. Pipeline
+    WGPUPipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 0;
+    plDesc.bindGroupLayouts = nullptr;
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
+
+    WGPUColorTargetState colorTarget = {};
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
+    colorTarget.blend = nullptr;
+
+    WGPUFragmentState fragmentState = {};
+    fragmentState.module = fsModule;
+    fragmentState.entryPoint = { "main", 4 };
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTarget;
+
+    WGPURenderPipelineDescriptor pipeDesc = {};
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.vertex.module = vsModule;
+    pipeDesc.vertex.entryPoint = { "main", 4 };
+    pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeDesc.primitive.cullMode = WGPUCullMode_None;
+    pipeDesc.primitive.frontFace = WGPUFrontFace_CCW;
+    pipeDesc.multisample.count = 1;
+    pipeDesc.multisample.mask = 0xFFFFFFFF;
+    pipeDesc.fragment = &fragmentState;
+
+    WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeDesc);
+    ASSERT_NE(pipeline, nullptr);
+
+    // 3. Resources
+    WGPUTextureDescriptor texDesc = {};
+    texDesc.size = {width, height, 1};
+    texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount = 1;
+    texDesc.dimension = WGPUTextureDimension_2D;
+    WGPUTexture texture = wgpuDeviceCreateTexture(device, &texDesc);
+    WGPUTextureView view = wgpuTextureCreateView(texture, nullptr);
+
+    WGPUBufferDescriptor bufDesc = {};
+    bufDesc.size = bufferSize;
+    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &bufDesc);
+
+    // 4. Encode
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+
+    WGPURenderPassColorAttachment att = {};
+    att.view = view;
+    att.loadOp = WGPULoadOp_Clear;
+    att.storeOp = WGPUStoreOp_Store;
+    att.clearValue = {0.0, 0.0, 1.0, 1.0}; // Blue Clear
+
+    WGPURenderPassDescriptor rpDesc = {};
+    rpDesc.colorAttachmentCount = 1;
+    rpDesc.colorAttachments = &att;
+
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &rpDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    WGPUTexelCopyTextureInfo srcInfo = {};
+    srcInfo.texture = texture;
+    srcInfo.aspect = WGPUTextureAspect_All;
+    
+    WGPUTexelCopyBufferInfo dstInfo = {};
+    dstInfo.buffer = readBuffer;
+    dstInfo.layout.bytesPerRow = bytesPerRow;
+    dstInfo.layout.rowsPerImage = height;
+
+    WGPUExtent3D copySize = {width, height, 1};
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &srcInfo, &dstInfo, &copySize);
+
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuCommandEncoderRelease(encoder);
+
+    // 5. Submit
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandBufferRelease(cmd);
+
+    // 6. Map & Verify
+    struct MapCtx { bool done = false; } mapCtx;
+    auto mapCb = [](WGPUMapAsyncStatus, WGPUStringView, void* ud, void*) {
+        ((MapCtx*)ud)->done = true;
+    };
+    WGPUBufferMapCallbackInfo cbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
+    
+    WGPUFuture future = wgpuBufferMapAsync(readBuffer, WGPUMapMode_Read, 0, bufferSize, cbInfo);
+    WGPUFutureWaitInfo fwi = { .future = future, .completed = 0 };
+
+    while(!mapCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT32_MAX);
+    }
+
+    const uint8_t* pixels = (const uint8_t*)wgpuBufferGetConstMappedRange(readBuffer, 0, bufferSize);
+    ASSERT_NE(pixels, nullptr);
+
+    auto checkPixel = [&](uint32_t x, uint32_t y, uint8_t r, uint8_t g, uint8_t b) {
+        size_t offset = y * bytesPerRow + x * 4;
+        EXPECT_EQ(pixels[offset+0], r) << "R mismatch at " << x << "," << y;
+        EXPECT_EQ(pixels[offset+1], g) << "G mismatch at " << x << "," << y;
+        EXPECT_EQ(pixels[offset+2], b) << "B mismatch at " << x << "," << y;
+        EXPECT_EQ(pixels[offset+3], 255);
+    };
+
+    // Check Inside Triangle (Green)
+    // This region is definitely covered by TL-BL-BR triangle (x <= y roughly)
+    checkPixel(10, 50, 0, 255, 0); 
+    checkPixel(0, 63, 0, 255, 0);
+
+    // Check Outside Triangle (Blue Clear Color)
+    // This region is Top-Right (x > y)
+    checkPixel(50, 10, 0, 0, 255);
+    checkPixel(63, 0, 0, 0, 255);
+
+    wgpuBufferUnmap(readBuffer);
+
+    // 7. Cleanup
+    for(uint32_t i = 0; i < framesInFlight; i++){
+        wgpuDeviceTick(device);
+    }
+
+    wgpuBufferRelease(readBuffer);
+    wgpuTextureViewRelease(view);
+    wgpuTextureRelease(texture);
+    wgpuRenderPipelineRelease(pipeline);
+    wgpuPipelineLayoutRelease(pipelineLayout);
+    wgpuShaderModuleRelease(vsModule);
+    wgpuShaderModuleRelease(fsModule);
+}
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

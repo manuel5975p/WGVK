@@ -1460,9 +1460,8 @@ WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor* descriptor) {
     }
 
 
-    // 8. Return the created instance handle
-    return ret;
     EXIT();
+    return ret;
 }
 WGPUWaitStatus wgpuInstanceWaitAny(WGPUInstance instance, size_t futureCount, WGPUFutureWaitInfo* futureWaitInfos, uint64_t timeoutNS){
     ENTRY();
@@ -1476,14 +1475,15 @@ WGPUWaitStatus wgpuInstanceWaitAny(WGPUInstance instance, size_t futureCount, WG
             futureWaitInfos[i].completed = 1;
         }
     }
-    return WGPUWaitStatus_Success;
     EXIT();
+    return WGPUWaitStatus_Success;
 }
 typedef struct userdataforcreateadapter{
     WGPUInstance instance;
     WGPURequestAdapterCallbackInfo info;
     WGPURequestAdapterOptions options;
 } userdataforcreateadapter;
+
 static inline VkPhysicalDeviceType tvkpdt(WGPUAdapterType atype){
     switch(atype){
         case WGPUAdapterType_DiscreteGPU:{
@@ -7811,11 +7811,15 @@ static OptionalBarrier ru_trackTextureAndEmit(ResourceUsage* resourceUsage, WGPU
             texture->image,
             usage.subresource
         };
+        
+        const VkPipelineStageFlags oldStage = alreadyThere->lastStage;
+
         alreadyThere->lastStage  = usage.stage;
         alreadyThere->lastAccess = usage.access;
         alreadyThere->lastLayout = usage.layout;
+        
         const OptionalBarrier ret = {
-            .srcStage = alreadyThere->lastStage,
+            .srcStage = oldStage,
             .dstStage = usage.stage,
             .type = bt_image_barrier,
             .imageBarrier = barr
@@ -7861,11 +7865,15 @@ static OptionalBarrier ru_trackTextureViewAndEmit(ResourceUsage* resourceUsage, 
             view->texture->image,
             view->subresourceRange
         };
+
+        const VkPipelineStageFlags oldStage = alreadyThere->lastStage;
+
         alreadyThere->lastStage  = usage.stage;
         alreadyThere->lastAccess = usage.access;
         alreadyThere->lastLayout = usage.layout;
+        
         const OptionalBarrier ret = {
-            .srcStage = alreadyThere->lastStage,
+            .srcStage = oldStage,
             .dstStage = usage.stage,
             .type = bt_image_barrier,
             .imageBarrier = barr
@@ -7893,6 +7901,7 @@ static OptionalBarrier ru_trackTextureViewAndEmit(ResourceUsage* resourceUsage, 
         };
     }
 }
+
 static OptionalBarrier ru_trackBufferAndEmit(ResourceUsage* resourceUsage, WGPUBuffer buffer, BufferUsageSnap usage){
     BufferUsageRecord* rec = BufferUsageRecordMap_get(&resourceUsage->referencedBuffers, buffer);
     
