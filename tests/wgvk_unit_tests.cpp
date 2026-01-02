@@ -857,10 +857,7 @@ TEST_F(WebGPUTest, RenderPassTriangleDraw) {
     WGPUBufferMapCallbackInfo cbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
     
     WGPUFuture future = wgpuBufferMapAsync(readBuffer, WGPUMapMode_Read, 0, bufferSize, cbInfo);
-    WGPUFutureWaitInfo fwi = {
-        /*.future=*/   future,
-        /*.completed=*/0
-    };
+    WGPUFutureWaitInfo fwi = { .future = future, .completed = 0 };
 
     while(!mapCtx.done) {
         wgpuInstanceWaitAny(instance, 1, &fwi, UINT32_MAX);
