@@ -900,6 +900,73 @@ TEST_F(WebGPUTest, RenderPassTriangleDraw) {
     wgpuShaderModuleRelease(fsModule);
 }
 
+TEST_F(WebGPUTest, LimitsGetAndSet) {
+    // Get limits from adapter
+    WGPULimits adapterLimits = {0};
+    ASSERT_EQ(wgpuAdapterGetLimits(adapter, &adapterLimits), WGPUStatus_Success) << "Failed to get adapter limits";
+    
+    // Verify that core limits are reasonable (non-zero, within expected ranges)
+    EXPECT_GT(adapterLimits.maxTextureDimension1D, 0u);
+    EXPECT_GT(adapterLimits.maxTextureDimension2D, 0u);
+    EXPECT_GT(adapterLimits.maxTextureDimension3D, 0u);
+    EXPECT_GT(adapterLimits.maxBufferSize, 0ull);
+    EXPECT_GE(adapterLimits.maxBindGroups, 4u); // WebGPU spec minimum is 4
+    EXPECT_GT(adapterLimits.maxVertexBuffers, 0u);
+    EXPECT_GT(adapterLimits.maxComputeInvocationsPerWorkgroup, 0u);
+    
+    // Verify alignment limits are power of 2
+    EXPECT_EQ(adapterLimits.minUniformBufferOffsetAlignment & (adapterLimits.minUniformBufferOffsetAlignment - 1), 0u) 
+        << "minUniformBufferOffsetAlignment should be power of 2";
+    EXPECT_EQ(adapterLimits.minStorageBufferOffsetAlignment & (adapterLimits.minStorageBufferOffsetAlignment - 1), 0u)
+        << "minStorageBufferOffsetAlignment should be power of 2";
+
+    // Test 2: Create device WITH specific required limits - should return those limits
+    struct DeviceCtx {
+        WGPUDevice device = nullptr;
+        bool done = false;
+    } deviceCtx;
+    
+    auto deviceCallback = [](WGPURequestDeviceStatus status, WGPUDevice dev, WGPUStringView msg, void* userdata, void* userdata2) {
+        DeviceCtx* ctx = (DeviceCtx*)userdata;
+        ctx->device = dev;
+        ctx->done = true;
+    };
+    
+    WGPULimits requiredLimits = adapterLimits;
+    requiredLimits.maxTextureDimension2D = 4096;
+    requiredLimits.maxBindGroups = 6;
+    
+    WGPUDeviceDescriptor deviceDesc3 = {0};
+    deviceDesc3.requiredLimits = &requiredLimits;
+    
+    WGPURequestDeviceCallbackInfo cbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, deviceCallback, &deviceCtx, nullptr };
+    WGPUFuture future = wgpuAdapterRequestDevice(adapter, &deviceDesc3, cbInfo);
+    WGPUFutureWaitInfo fwi = { .future = future, .completed = 0 };
+    
+    while(!deviceCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT32_MAX);
+    }
+    
+    ASSERT_NE(deviceCtx.device, nullptr) << "Failed to create device with required limits";
+    WGPUDevice device3 = deviceCtx.device;
+    
+    WGPULimits deviceLimits3 = {0};
+    wgpuDeviceGetLimits(device3, &deviceLimits3);
+    EXPECT_EQ(deviceLimits3.maxTextureDimension2D, 4096u) << "Device should return requested maxTextureDimension2D";
+    EXPECT_EQ(deviceLimits3.maxBindGroups, 6u) << "Device should return requested maxBindGroups";
+    
+    // TODO: Test that creating textures larger than maxTextureDimension2D fails
+    // Currently not enforced, but should be:
+    // WGPUTextureDescriptor texDesc = {0};
+    // texDesc.size = {deviceLimits3.maxTextureDimension2D + 1, 1, 1};
+    // texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    // texDesc.usage = WGPUTextureUsage_CopyDst;
+    // WGPUTexture tex = wgpuDeviceCreateTexture(device3, &texDesc);
+    // EXPECT_EQ(tex, nullptr) << "Should fail to create texture exceeding limits";
+    
+    wgpuDeviceRelease(device3);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
