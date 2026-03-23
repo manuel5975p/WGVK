@@ -2641,7 +2641,7 @@ WGPUFuture wgpuAdapterRequestDevice(WGPUAdapter adapter, WGPU_NULLABLE WGPUDevic
     userdata->adapter = adapter;
     userdata->callbackInfo = callbackInfo;
     if(options)
-    userdata->deviceDescriptor = *options;
+        userdata->deviceDescriptor = *options;
     WGPUFutureImpl impl = {
         .userdataForFunction = userdata,
         .functionCalledOnWaitAny = wgpuAdapterCreateDevice_sync,
