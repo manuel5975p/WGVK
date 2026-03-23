@@ -7187,7 +7187,7 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
 void wgpuFenceReset(WGPUFence fence){
     wgvk_assert(atomic_load_explicit(&fence->state, memory_order_acquire) == WGPUFenceState_Finished, "Fence must be finished");
     fence->device->functions.vkResetFences(fence->device->device, 1, &fence->fence);
-    atomic_store_explicit(&fence->state, memory_order_release, WGPUFenceState_Reset);
+    atomic_store_explicit(&fence->state, WGPUFenceState_Reset, memory_order_release);
 }
 
 
