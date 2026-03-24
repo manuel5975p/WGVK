@@ -3622,7 +3622,7 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
         #endif
         default: {
             RL_FREE(ret);
-            //wgvk_assert(false, "Invalid shader source type");
+            wgvk_assert(false, "Invalid shader source type");
             return NULL;
         }
     }
