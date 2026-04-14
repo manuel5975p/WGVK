@@ -5691,6 +5691,46 @@ static inline VkColorSpaceKHR toVulkanColorSpace(WGPUPredefinedColorSpace wcsp, 
 
 WGPUStatus wgpuSurfaceGetCapabilities(WGPUSurface wgpuSurface, WGPUAdapter adapter, WGPUSurfaceCapabilities* capabilities){
     ENTRY();
+    if(capabilities){
+        memset(capabilities, 0, sizeof(*capabilities));
+    }
+    if(wgpuSurface == NULL){
+        TRACELOG(WGPU_LOG_ERROR, "wgpuSurfaceGetCapabilities: surface is NULL");
+        EXIT();
+        return WGPUStatus_Error;
+    }
+    if(adapter == NULL){
+        TRACELOG(WGPU_LOG_ERROR, "wgpuSurfaceGetCapabilities: adapter is NULL");
+        if(wgpuSurface->device){
+            DeviceCallback(wgpuSurface->device, WGPUErrorType_Validation, STRVIEW("wgpuSurfaceGetCapabilities: adapter is NULL"));
+        }
+        EXIT();
+        return WGPUStatus_Error;
+    }
+    if(capabilities == NULL){
+        TRACELOG(WGPU_LOG_ERROR, "wgpuSurfaceGetCapabilities: capabilities is NULL");
+        if(wgpuSurface->device){
+            DeviceCallback(wgpuSurface->device, WGPUErrorType_Validation, STRVIEW("wgpuSurfaceGetCapabilities: capabilities is NULL"));
+        }
+        EXIT();
+        return WGPUStatus_Error;
+    }
+    if(wgpuSurface->surface == VK_NULL_HANDLE){
+        TRACELOG(WGPU_LOG_ERROR, "wgpuSurfaceGetCapabilities: surface handle is NULL");
+        if(wgpuSurface->device){
+            DeviceCallback(wgpuSurface->device, WGPUErrorType_Validation, STRVIEW("wgpuSurfaceGetCapabilities: surface is invalid"));
+        }
+        EXIT();
+        return WGPUStatus_Error;
+    }
+    if(adapter->physicalDevice == VK_NULL_HANDLE){
+        TRACELOG(WGPU_LOG_ERROR, "wgpuSurfaceGetCapabilities: adapter physical device is NULL");
+        if(wgpuSurface->device){
+            DeviceCallback(wgpuSurface->device, WGPUErrorType_Validation, STRVIEW("wgpuSurfaceGetCapabilities: adapter is invalid"));
+        }
+        EXIT();
+        return WGPUStatus_Error;
+    }
     if(wgpuSurface->capabilityCache.formatCount){
         *capabilities = wgpuSurface->capabilityCache;
         return WGPUStatus_Success;

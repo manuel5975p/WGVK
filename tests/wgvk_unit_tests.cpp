@@ -123,6 +123,22 @@ protected:
     }
 };
 
+TEST(WGPUApiValidation, SurfaceGetCapabilitiesRejectsNullArgsAndClearsOutput) {
+    WGPUSurfaceCapabilities caps = {};
+    caps.formatCount = 123;
+    caps.presentModeCount = 456;
+    caps.alphaModeCount = 789;
+    caps.formats = reinterpret_cast<WGPUTextureFormat*>(uintptr_t(0x1));
+
+    EXPECT_EQ(wgpuSurfaceGetCapabilities(nullptr, nullptr, &caps), WGPUStatus_Error);
+    EXPECT_EQ(caps.formatCount, 0u);
+    EXPECT_EQ(caps.presentModeCount, 0u);
+    EXPECT_EQ(caps.alphaModeCount, 0u);
+    EXPECT_EQ(caps.formats, nullptr);
+
+    EXPECT_EQ(wgpuSurfaceGetCapabilities(nullptr, nullptr, nullptr), WGPUStatus_Error);
+}
+
 TEST_F(WebGPUTest, BufferReferenceCounting) {
     WGPUBufferDescriptor desc = {};
     desc.size = 1024;
