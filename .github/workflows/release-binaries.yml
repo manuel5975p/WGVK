@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -113,14 +116,14 @@ jobs:
         
         # Create archive
         if [[ "${{ matrix.os }}" == "windows" ]]; then
-          powershell Compress-Archive -Path dist/* -DestinationPath "${FULL_ARCHIVE_NAME}"
+          powershell -NoProfile -Command "Compress-Archive -Path 'dist/*' -DestinationPath '${FULL_ARCHIVE_NAME}'"
         else
           tar -czf "${FULL_ARCHIVE_NAME}" -C dist .
         fi
         
         # Save archive name for upload step
         echo "ARCHIVE_NAME=${FULL_ARCHIVE_NAME}" >> $GITHUB_ENV
-        echo "ARCHIVE_PATH=${PWD}/${FULL_ARCHIVE_NAME}" >> $GITHUB_ENV
+        echo "ARCHIVE_PATH=${FULL_ARCHIVE_NAME}" >> $GITHUB_ENV
         
         # Display archive info
         ls -la "${FULL_ARCHIVE_NAME}"
@@ -130,6 +133,7 @@ jobs:
       with:
         name: ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.library_type }}-binaries
         path: ${{ env.ARCHIVE_PATH }}
+        if-no-files-found: error
         retention-days: 30
 
   release:
@@ -147,30 +151,30 @@ jobs:
     - name: Set release info
       shell: bash
       run: |
-        echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+        echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
         
         # Get tag message for release body
-        TAG_MESSAGE=$(git tag -l --format='%(contents)' "${GITHUB_REF#refs/tags/}" | head -20)
+        TAG_MESSAGE=$(git tag -l --format='%(contents)' "${RELEASE_TAG}" | head -20)
         if [[ -z "$TAG_MESSAGE" ]]; then
-          TAG_MESSAGE="Release ${GITHUB_REF#refs/tags/}"
+          TAG_MESSAGE="Release ${RELEASE_TAG}"
         fi
         
-        # Save to multiline environment variable
-        cat << 'EOF' >> $GITHUB_ENV
-        RELEASE_BODY<<EOL
-        $TAG_MESSAGE
-        
+        {
+          printf '%s\n\n' "$TAG_MESSAGE"
+          cat << 'EOF'
         ## Platform Binaries
-
+        
         Each archive contains the WGVK library + headers, built with simple_wgsl as the WGSL frontend.
         Pick `static` for a single-file link, or `shared` for a `.so`/`.dll` plus import library.
-
-        - **Linux x86_64 (static)**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64-static.tar.gz`
-        - **Linux x86_64 (shared)**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64-shared.tar.gz`
-        - **macOS ARM64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-aarch64-static.tar.gz`
-        - **Windows x86_64 (static)**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64-static.zip`
-        - **Windows x86_64 (shared)**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64-shared.zip`
-
+        
+        EOF
+          printf -- '- **Linux x86_64 (static)**: `WGVK-%s-linux-x86_64-static.tar.gz`\n' "$RELEASE_TAG"
+          printf -- '- **Linux x86_64 (shared)**: `WGVK-%s-linux-x86_64-shared.tar.gz`\n' "$RELEASE_TAG"
+          printf -- '- **macOS ARM64**: `WGVK-%s-macos-aarch64-static.tar.gz`\n' "$RELEASE_TAG"
+          printf -- '- **Windows x86_64 (static)**: `WGVK-%s-windows-x86_64-static.zip`\n' "$RELEASE_TAG"
+          printf -- '- **Windows x86_64 (shared)**: `WGVK-%s-windows-x86_64-shared.zip`\n\n' "$RELEASE_TAG"
+          cat << 'EOF'
         Each archive contains:
         - The WGVK library (`libwgvk.a` / `libwgvk.so` / `wgvk.lib` / `wgvk.dll`)
         - `include/` - Header files
@@ -187,8 +191,8 @@ jobs:
         ```
         
         For more examples and documentation, see the [README](https://github.com/manuel5975p/WGVK/blob/master/README.md).
-        EOL
         EOF
+        } > RELEASE_BODY.md
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -215,7 +219,7 @@ jobs:
       with:
         tag_name: ${{ env.RELEASE_TAG }}
         name: ${{ env.RELEASE_TAG }}
-        body: ${{ env.RELEASE_BODY }}
+        body_path: RELEASE_BODY.md
         draft: false
         prerelease: ${{ contains(env.RELEASE_TAG, '-') || contains(env.RELEASE_TAG, 'alpha') || contains(env.RELEASE_TAG, 'beta') || contains(env.RELEASE_TAG, 'rc') }}
         files: |
