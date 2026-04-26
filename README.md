@@ -14,7 +14,6 @@
 </a>
 
 
-
 A standalone, single-file, fully feature-conformant implementation WebGPU API in C11, built on top of Vulkan 1.1. WGVK is designed for easy integration into C/C++ projects, providing a modern graphics and compute API without the steep learning curve of raw Vulkan.
 ## Implementation progress
 
