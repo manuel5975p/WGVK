@@ -3647,9 +3647,18 @@ WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShade
             return wgpuDeviceCreateShaderModuleGLSL(device, descriptor);
         }break;
         #endif
+        #if SUPPORT_WGSL != 1
+        case WGPUSType_ShaderSourceWGSL: {
+            RL_FREE(ret);
+            DeviceCallback(device, WGPUErrorType_Validation,
+                STRVIEW("WGSL shader source provided but WGVK was built without WGSL support; rebuild with -DWGVK_WGSL_SUPPORT=SIMPLE_WGSL (or =TINT)"));
+            return NULL;
+        }
+        #endif
         default: {
             RL_FREE(ret);
-            wgvk_assert(false, "Invalid shader source type");
+            DeviceCallback(device, WGPUErrorType_Validation,
+                STRVIEW("Invalid sType in WGPUShaderModuleDescriptor.nextInChain"));
             return NULL;
         }
     }
@@ -8486,14 +8495,28 @@ static void wgpuShaderModuleGetReflectionInfo_sync(void* userdata_){
         }break;
         #else
         case WGPUSType_ShaderSourceWGSL:{
-            wgvk_assert(false, "Passed WGSL source without support, recompile with -DSUPPORT_WGSL=1");
+            DeviceCallback(module->device, WGPUErrorType_Validation,
+                STRVIEW("WGSL shader source reflection requested but WGVK was built without WGSL support; rebuild with -DWGVK_WGSL_SUPPORT=SIMPLE_WGSL (or =TINT)"));
+            userdata->callbackInfo.callback(
+                WGPUReflectionInfoRequestStatus_CallbackCancelled,
+                NULL,
+                userdata->callbackInfo.userdata1,
+                userdata->callbackInfo.userdata2
+            );
         }break;
         #endif
         default:
-        wgvk_assert(false, "Invalid sType for source");
-        rg_unreachable();
+            DeviceCallback(module->device, WGPUErrorType_Validation,
+                STRVIEW("Invalid sType in shader module source for reflection"));
+            userdata->callbackInfo.callback(
+                WGPUReflectionInfoRequestStatus_CallbackCancelled,
+                NULL,
+                userdata->callbackInfo.userdata1,
+                userdata->callbackInfo.userdata2
+            );
+            break;
     }
-    
+
     EXIT();
 }
 
@@ -8540,7 +8563,9 @@ void wgpuSupportedFeaturesFreeMembers(WGPUSupportedFeatures value) {
 }
 void wgpuSupportedWGSLLanguageFeaturesFreeMembers(WGPUSupportedWGSLLanguageFeatures value) {
     ENTRY();
-    (void)value;
+    if (value.features) {
+        RL_FREE((void*)value.features);
+    }
     EXIT();
 }
 void wgpuSurfaceCapabilitiesFreeMembers(WGPUSurfaceCapabilities value) {
@@ -9284,19 +9309,64 @@ void wgpuDeviceSetLabel(WGPUDevice device, WGPUStringView label) {
     EXIT();
 }
 
-// Stubs for missing Methods of Instance
+// Methods of Instance — WGSL language feature query.
+// Reports the WGSL language extensions supported by the active WGSL frontend
+// (Tint or simple_wgsl). With no WGSL backend, returns the empty set.
 void wgpuInstanceGetWGSLLanguageFeatures(WGPUInstance instance, WGPUSupportedWGSLLanguageFeatures * features) {
     ENTRY();
-    if (features) {
+    (void)instance;
+    if (!features) { EXIT(); return; }
+#if defined(WGVK_WGSL_BACKEND_TINT)
+    WGPUWGSLLanguageFeatureName tmp[8];
+    uint32_t n = tintGetWGSLLanguageFeatures(tmp, (uint32_t)(sizeof(tmp)/sizeof(tmp[0])));
+    if (n == 0) {
         features->featureCount = 0;
         features->features = NULL;
+    } else {
+        WGPUWGSLLanguageFeatureName* out = (WGPUWGSLLanguageFeatureName*)RL_CALLOC(n, sizeof(*out));
+        for (uint32_t i = 0; i < n; ++i) out[i] = tmp[i];
+        features->featureCount = n;
+        features->features = out;
     }
+#elif defined(WGVK_WGSL_BACKEND_SIMPLE_WGSL)
+    static const WGPUWGSLLanguageFeatureName kFeats[] = {
+        WGPUWGSLLanguageFeatureName_ReadonlyAndReadwriteStorageTextures,
+        WGPUWGSLLanguageFeatureName_SizedBindingArray,
+    };
+    const uint32_t n = (uint32_t)(sizeof(kFeats)/sizeof(kFeats[0]));
+    WGPUWGSLLanguageFeatureName* out = (WGPUWGSLLanguageFeatureName*)RL_CALLOC(n, sizeof(*out));
+    for (uint32_t i = 0; i < n; ++i) out[i] = kFeats[i];
+    features->featureCount = n;
+    features->features = out;
+#else
+    features->featureCount = 0;
+    features->features = NULL;
+#endif
     EXIT();
 }
 WGPUBool wgpuInstanceHasWGSLLanguageFeature(WGPUInstance instance, WGPUWGSLLanguageFeatureName feature) {
     ENTRY();
+    (void)instance;
+#if defined(WGVK_WGSL_BACKEND_TINT)
+    WGPUBool r = tintHasWGSLLanguageFeature(feature);
+    EXIT();
+    return r;
+#elif defined(WGVK_WGSL_BACKEND_SIMPLE_WGSL)
+    switch (feature) {
+        case WGPUWGSLLanguageFeatureName_ReadonlyAndReadwriteStorageTextures:
+        case WGPUWGSLLanguageFeatureName_SizedBindingArray:
+            EXIT();
+            return 1;
+        default:
+            break;
+    }
     EXIT();
     return 0;
+#else
+    (void)feature;
+    EXIT();
+    return 0;
+#endif
 }
 void wgpuInstanceProcessEvents(WGPUInstance instance) {
     ENTRY()

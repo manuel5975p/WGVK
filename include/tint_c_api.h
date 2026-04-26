@@ -22,4 +22,7 @@ typedef struct tc_SpirvBlob{
 RGAPI tc_SpirvBlob wgslToSpirv(const WGPUShaderSourceWGSL* source, uint32_t constantCount, const WGPUConstantEntry* constants);
 RGAPI void reflectionInfo_wgsl_free(WGPUReflectionInfo* reflectionInfo);
 
+RGAPI WGPUBool tintHasWGSLLanguageFeature(WGPUWGSLLanguageFeatureName feature);
+RGAPI uint32_t tintGetWGSLLanguageFeatures(WGPUWGSLLanguageFeatureName* outBuf, uint32_t bufCap);
+
 #endif

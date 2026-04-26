@@ -1,6 +1,7 @@
 #include <iostream>
 #include <wgvk.h>
 #include <src/tint/lang/core/ir/transform/substitute_overrides.h>
+#include <src/tint/lang/wgsl/allowed_features.h>
 #include <src/tint/lang/wgsl/ast/identifier_expression.h>
 #include <src/tint/lang/wgsl/ast/templated_identifier.h>
 #include <src/tint/lang/wgsl/ast/variable_decl_statement.h>
@@ -11,6 +12,7 @@
 #include <src/tint/lang/wgsl/ast/float_literal_expression.h>
 #include <src/tint/lang/wgsl/ast/int_literal_expression.h>
 #include <src/tint/lang/wgsl/ast/module.h>
+#include <src/tint/lang/wgsl/language_feature.h>
 #include <src/tint/lang/wgsl/program/program.h>
 #include <src/tint/lang/wgsl/reader/reader.h>
 #include <src/tint/lang/wgsl/sem/function.h>
@@ -289,6 +291,50 @@ RGAPI void reflectionInfo_wgsl_free(WGPUReflectionInfo *reflectionInfo) {
     RL_FREE((void*)reflectionInfo->globals);
     RL_FREE((void*)reflectionInfo->inputAttributes);
     RL_FREE((void*)reflectionInfo->outputAttributes);
+}
+
+// Mapping between WGSL language features as exposed by webgpu.h and Tint's
+// internal enum. Names that exist in Tint but have no corresponding WGPU enum
+// are intentionally omitted — only features visible at the WebGPU API surface
+// are reportable to clients.
+namespace {
+struct WgslFeaturePair {
+    WGPUWGSLLanguageFeatureName wgpu;
+    tint::wgsl::LanguageFeature tint;
+};
+static const WgslFeaturePair kWgslFeaturePairs[] = {
+    {WGPUWGSLLanguageFeatureName_ReadonlyAndReadwriteStorageTextures,
+        tint::wgsl::LanguageFeature::kReadonlyAndReadwriteStorageTextures},
+    {WGPUWGSLLanguageFeatureName_Packed4x8IntegerDotProduct,
+        tint::wgsl::LanguageFeature::kPacked4X8IntegerDotProduct},
+    {WGPUWGSLLanguageFeatureName_UnrestrictedPointerParameters,
+        tint::wgsl::LanguageFeature::kUnrestrictedPointerParameters},
+    {WGPUWGSLLanguageFeatureName_PointerCompositeAccess,
+        tint::wgsl::LanguageFeature::kPointerCompositeAccess},
+    {WGPUWGSLLanguageFeatureName_SizedBindingArray,
+        tint::wgsl::LanguageFeature::kSizedBindingArray},
+};
+}  // namespace
+
+RGAPI WGPUBool tintHasWGSLLanguageFeature(WGPUWGSLLanguageFeatureName feature) {
+    auto allowed = tint::wgsl::AllowedFeatures::Everything();
+    for (const auto& pair : kWgslFeaturePairs) {
+        if (pair.wgpu == feature) {
+            return allowed.features.Contains(pair.tint) ? 1 : 0;
+        }
+    }
+    return 0;
+}
+
+RGAPI uint32_t tintGetWGSLLanguageFeatures(WGPUWGSLLanguageFeatureName* outBuf, uint32_t bufCap) {
+    auto allowed = tint::wgsl::AllowedFeatures::Everything();
+    uint32_t n = 0;
+    for (const auto& pair : kWgslFeaturePairs) {
+        if (!allowed.features.Contains(pair.tint)) continue;
+        if (outBuf && n < bufCap) outBuf[n] = pair.wgpu;
+        ++n;
+    }
+    return n;
 }
 
 RGAPI tc_SpirvBlob wgslToSpirv(const WGPUShaderSourceWGSL *source, uint32_t constantCount, const WGPUConstantEntry* constants) {

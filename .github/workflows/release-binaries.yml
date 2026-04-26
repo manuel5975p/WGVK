@@ -10,36 +10,56 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.library_type }}
     runs-on: ${{ matrix.runner }}
-    
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
+          # Linux x86_64 (static + shared)
           - os: linux
             arch: x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            
-          # macOS x86_64
+            library_type: static
+            shared: "OFF"
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            library_type: shared
+            shared: "ON"
+
+          # macOS x86_64 (static only)
           - os: macos
             arch: x86_64
             runner: macos-13  # Intel
             target: x86_64-apple-darwin
-            
-          # macOS ARM64
+            library_type: static
+            shared: "OFF"
+
+          # macOS ARM64 (static only)
           - os: macos
             arch: aarch64
             runner: macos-latest  # Apple Silicon
             target: aarch64-apple-darwin
-            
-          # Windows x86_64
+            library_type: static
+            shared: "OFF"
+
+          # Windows x86_64 (static + shared)
           - os: windows
             arch: x86_64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
+            library_type: static
+            shared: "OFF"
+          - os: windows
+            arch: x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            library_type: shared
+            shared: "ON"
 
     steps:
     - name: Checkout code
@@ -71,12 +91,13 @@ jobs:
           -DWGVK_BUILD_EXAMPLES=OFF \
           -DWGVK_USE_VMA=ON \
           -DWGVK_BUILD_GLSL_SUPPORT=ON \
-          -DWGVK_BUILD_WGSL_SUPPORT=OFF \
+          -DWGVK_WGSL_SUPPORT=SIMPLE_WGSL \
+          -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
           -DCMAKE_INSTALL_PREFIX=./dist
-        
+
         # Build the project
         cmake --build build-release --config Release --parallel 4
-        
+
         # Install to dist directory
         cmake --install build-release
         
@@ -86,7 +107,7 @@ jobs:
         # Create platform-specific archive name
         REPO_NAME="${{ github.repository }}"
         REPO_NAME_SHORT="${REPO_NAME##*/}"
-        ARCHIVE_NAME="${REPO_NAME_SHORT}-${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.arch }}"
+        ARCHIVE_NAME="${REPO_NAME_SHORT}-${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.library_type }}"
         
         # Determine file extension
         if [[ "${{ matrix.os }}" == "windows" ]]; then
@@ -114,7 +135,7 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.os }}-${{ matrix.arch }}-binaries
+        name: ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.library_type }}-binaries
         path: ${{ env.ARCHIVE_PATH }}
         retention-days: 30
 
@@ -147,17 +168,20 @@ jobs:
         $TAG_MESSAGE
         
         ## Platform Binaries
-        
-        Download the appropriate binary for your platform:
-        - **Linux x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64.tar.gz`
-        - **macOS x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-x86_64.tar.gz`
-        - **macOS ARM64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-aarch64.tar.gz`
-        - **Windows x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64.zip`
-        
+
+        Each archive contains the WGVK library + headers, built with simple_wgsl as the WGSL frontend.
+        Pick `static` for a single-file link, or `shared` for a `.so`/`.dll` plus import library.
+
+        - **Linux x86_64 (static)**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64-static.tar.gz`
+        - **Linux x86_64 (shared)**: `WGVK-${GITHUB_REF#refs/tags/}-linux-x86_64-shared.tar.gz`
+        - **macOS x86_64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-x86_64-static.tar.gz`
+        - **macOS ARM64**: `WGVK-${GITHUB_REF#refs/tags/}-macos-aarch64-static.tar.gz`
+        - **Windows x86_64 (static)**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64-static.zip`
+        - **Windows x86_64 (shared)**: `WGVK-${GITHUB_REF#refs/tags/}-windows-x86_64-shared.zip`
+
         Each archive contains:
-        - `libwgvk.a` - Static library for linking
+        - The WGVK library (`libwgvk.a` / `libwgvk.so` / `wgvk.lib` / `wgvk.dll`)
         - `include/` - Header files
-        - `README.txt` - Usage instructions
         
         ## Quick Start
         
