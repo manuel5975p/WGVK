@@ -2022,7 +2022,6 @@ WGVK_EXPORT void wgpuRaytracingPassEncoderSetPipeline            (WGPURaytracing
 WGVK_EXPORT void wgpuRaytracingPassEncoderSetBindGroup           (WGPURaytracingPassEncoder cpe, uint32_t groupIndex, WGPUBindGroup bindGroup, uint32_t dynamicOffsetCount, const uint32_t* dynamicOffsets);
 WGVK_EXPORT void wgpuRaytracingPassEncoderTraceRays              (WGPURaytracingPassEncoder cpe,  uint32_t rayGenerationOffset, uint32_t rayHitOffset, uint32_t rayMissOffset, uint32_t width, uint32_t height, uint32_t depth);
 WGVK_EXPORT void wgpuComputePassEncoderDispatchWorkgroups        (WGPUComputePassEncoder cpe, uint32_t x, uint32_t y, uint32_t z);
-WGVK_EXPORT void wgpuComputePassEncoderRelease                   (WGPUComputePassEncoder cpenc);
 WGVK_EXPORT void wgpuSurfaceGetCurrentTexture                    (WGPUSurface surface, WGPUSurfaceTexture * surfaceTexture);
 WGVK_EXPORT WGPUStatus wgpuSurfacePresent                              (WGPUSurface surface);
 WGVK_EXPORT WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncoder enc, const WGPURayTracingPassDescriptor* rtDesc);
@@ -2171,8 +2170,7 @@ WGVK_EXPORT void wgpuComputePassEncoderRelease            (WGPUComputePassEncode
 WGVK_EXPORT void wgpuComputePipelineRelease               (WGPUComputePipeline pipeline);
 WGVK_EXPORT void wgpuRenderPipelineRelease                (WGPURenderPipeline pipeline);
 WGVK_EXPORT void wgpuBufferRelease                        (WGPUBuffer buffer);
-WGVK_EXPORT void wgpuBindGroupRelease                     (WGPUBindGroup commandBuffer);
-WGVK_EXPORT void wgpuBindGroupLayoutRelease               (WGPUBindGroupLayout commandBuffer);
+WGVK_EXPORT void wgpuBindGroupRelease                     (WGPUBindGroup bindGroup);
 WGVK_EXPORT void wgpuBindGroupLayoutRelease               (WGPUBindGroupLayout bglayout);
 WGVK_EXPORT void wgpuPipelineLayoutRelease                (WGPUPipelineLayout layout);
 WGVK_EXPORT void wgpuTextureRelease                       (WGPUTexture texture);
