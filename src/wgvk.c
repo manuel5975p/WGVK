@@ -947,6 +947,10 @@ void FIFCache_destroy(FIFCache* fcache){
     }
 }
 
+static inline bool is__depthStencilVk(VkFormat fmt){
+    return fmt == VK_FORMAT_D32_SFLOAT_S8_UINT || fmt == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
 static RenderPassLayout GetRenderPassLayout2(const RenderPassCommandBegin* rpdesc){
     RenderPassLayout ret zeroinit;
     if(rpdesc->depthAttachmentPresent){
@@ -955,7 +959,11 @@ static RenderPassLayout GetRenderPassLayout2(const RenderPassCommandBegin* rpdes
             .format = rpdesc->depthStencilAttachment.view->format, 
             .sampleCount = rpdesc->depthStencilAttachment.view->sampleCount,
             .loadop =  toVulkanLoadOperation(rpdesc->depthStencilAttachment.depthLoadOp),
-            .storeop = toVulkanStoreOperation(rpdesc->depthStencilAttachment.depthStoreOp)
+            .storeop = toVulkanStoreOperation(rpdesc->depthStencilAttachment.depthStoreOp),
+            .stencilLoadop = is__depthStencilVk(rpdesc->depthStencilAttachment.view->format) ?
+                toVulkanLoadOperation(rpdesc->depthStencilAttachment.stencilLoadOp) : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreop = is__depthStencilVk(rpdesc->depthStencilAttachment.view->format) ?
+                toVulkanStoreOperation(rpdesc->depthStencilAttachment.stencilStoreOp) : VK_ATTACHMENT_STORE_OP_DONT_CARE
         };
     }
 
@@ -996,7 +1004,11 @@ RenderPassLayout GetRenderPassLayout(const WGPURenderPassDescriptor* rpdesc){
             .format = rpdesc->depthStencilAttachment->view->format, 
             .sampleCount = rpdesc->depthStencilAttachment->view->sampleCount,
             .loadop =  toVulkanLoadOperation (rpdesc->depthStencilAttachment->depthLoadOp ),
-            .storeop = toVulkanStoreOperation(rpdesc->depthStencilAttachment->depthStoreOp)
+            .storeop = toVulkanStoreOperation(rpdesc->depthStencilAttachment->depthStoreOp),
+            .stencilLoadop = is__depthStencilVk(rpdesc->depthStencilAttachment->view->format) ?
+                toVulkanLoadOperation(rpdesc->depthStencilAttachment->stencilLoadOp) : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreop = is__depthStencilVk(rpdesc->depthStencilAttachment->view->format) ?
+                toVulkanStoreOperation(rpdesc->depthStencilAttachment->stencilStoreOp) : VK_ATTACHMENT_STORE_OP_DONT_CARE
         };
     }
     
@@ -1053,8 +1065,8 @@ static VkAttachmentDescription atttransformFunction(AttachmentDescriptor att){
     ret.format     = att.format;
     ret.loadOp     = att.loadop;
     ret.storeOp    = att.storeop;
-    ret.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    ret.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    ret.stencilLoadOp  = is__depthStencilVk(att.format) ? att.stencilLoadop : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    ret.stencilStoreOp = is__depthStencilVk(att.format) ? att.stencilStoreop : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     ret.initialLayout  = (att.loadop == VK_ATTACHMENT_LOAD_OP_LOAD ? (is__depthVk(att.format) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) : (VK_IMAGE_LAYOUT_UNDEFINED));
     if(is__depthVk(att.format)){
         ret.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -4241,7 +4253,7 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
 
     const ImageUsageSnap iur_resolve = iur_color;
     
-    const ImageUsageSnap iur_depth = {
+    ImageUsageSnap iur_depth = {
         .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         .access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
         .stage = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -4268,6 +4280,9 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, 
 
     if(rpdesc->depthStencilAttachment){
         wgvk_assert(rpdesc->depthStencilAttachment->view, "depthStencilAttachment.view is null");
+        if(is__depthStencilVk(rpdesc->depthStencilAttachment->view->format)){
+            iur_depth.subresource.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
         ce_trackTextureView(enc, rpdesc->depthStencilAttachment->view, iur_depth);
     }
     //wgpuRenderPassEncoderSetViewport(ret, 0, 0, rpdesc->colorAttachments[0].view->width, rpdesc->colorAttachments[0].view->height, 0, 1);
@@ -4425,19 +4440,35 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
         colorAttachments[i].storeOp = toVulkanStoreOperation(beginInfo->colorAttachments[i].storeOp);
     }
 
+    VkRenderingAttachmentInfo depthAttachment zeroinit;
+    VkRenderingAttachmentInfo stencilAttachment zeroinit;
+    const bool hasDepthStencilAttachment = beginInfo->depthAttachmentPresent;
+    const bool hasStencilAttachment = hasDepthStencilAttachment && is__depthStencilVk(beginInfo->depthStencilAttachment.view->format);
+    if(hasDepthStencilAttachment){
+        depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        depthAttachment.clearValue.depthStencil.depth = beginInfo->depthStencilAttachment.depthClearValue;
+        depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depthAttachment.imageView = beginInfo->depthStencilAttachment.view->view;
+        depthAttachment.loadOp = toVulkanLoadOperation(beginInfo->depthStencilAttachment.depthLoadOp);
+        depthAttachment.storeOp = toVulkanStoreOperation(beginInfo->depthStencilAttachment.depthStoreOp);
+
+        if(hasStencilAttachment){
+            stencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            stencilAttachment.clearValue.depthStencil.stencil = beginInfo->depthStencilAttachment.stencilClearValue;
+            stencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            stencilAttachment.imageView = beginInfo->depthStencilAttachment.view->view;
+            stencilAttachment.loadOp = toVulkanLoadOperation(beginInfo->depthStencilAttachment.stencilLoadOp);
+            stencilAttachment.storeOp = toVulkanStoreOperation(beginInfo->depthStencilAttachment.stencilStoreOp);
+        }
+    }
+
     const VkRenderingInfo info = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         //.flags = VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT | VK_RENDERING_CONTENTS_INLINE_BIT_KHR,
         .colorAttachmentCount = beginInfo->colorAttachmentCount,
         .pColorAttachments = colorAttachments,
-        .pDepthAttachment = beginInfo->depthAttachmentPresent ? &(const VkRenderingAttachmentInfo){
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .clearValue.depthStencil.depth = beginInfo->depthStencilAttachment.depthClearValue,
-            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .imageView = beginInfo->depthStencilAttachment.view->view,
-            .loadOp = toVulkanLoadOperation(beginInfo->depthStencilAttachment.depthLoadOp),
-            .storeOp = toVulkanStoreOperation(beginInfo->depthStencilAttachment.depthStoreOp),
-        } : NULL,
+        .pDepthAttachment = hasDepthStencilAttachment ? &depthAttachment : NULL,
+        .pStencilAttachment = hasStencilAttachment ? &stencilAttachment : NULL,
         .layerCount = 1,
         .renderArea = CLITERAL(VkRect2D){
             .offset = CLITERAL(VkOffset2D){0, 0},
