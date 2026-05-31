@@ -123,6 +123,88 @@ protected:
     }
 };
 
+namespace {
+void initFakeTextureView(WGPUTextureViewImpl* view, VkFormat format, uint32_t sampleCount = 1) {
+    memset(view, 0, sizeof(*view));
+    view->format = format;
+    view->sampleCount = sampleCount;
+}
+}
+
+TEST(RenderPassLayoutTest, DepthStencilAttachmentKeepsStencilLoadStoreOps) {
+    WGPUTextureViewImpl depthStencilView;
+    initFakeTextureView(&depthStencilView, VK_FORMAT_D24_UNORM_S8_UINT);
+
+    WGPURenderPassDepthStencilAttachment depthStencilAttachment = {};
+    depthStencilAttachment.view = &depthStencilView;
+    depthStencilAttachment.depthLoadOp = WGPULoadOp_Load;
+    depthStencilAttachment.depthStoreOp = WGPUStoreOp_Discard;
+    depthStencilAttachment.stencilLoadOp = WGPULoadOp_Clear;
+    depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Store;
+
+    WGPURenderPassDescriptor desc = {};
+    desc.depthStencilAttachment = &depthStencilAttachment;
+
+    RenderPassLayout layout = GetRenderPassLayout(&desc);
+
+    EXPECT_EQ(layout.depthAttachmentPresent, 1u);
+    EXPECT_EQ(layout.depthAttachment.format, VK_FORMAT_D24_UNORM_S8_UINT);
+    EXPECT_EQ(layout.depthAttachment.loadop, VK_ATTACHMENT_LOAD_OP_LOAD);
+    EXPECT_EQ(layout.depthAttachment.storeop, VK_ATTACHMENT_STORE_OP_DONT_CARE);
+    EXPECT_EQ(layout.depthAttachment.stencilLoadop, VK_ATTACHMENT_LOAD_OP_CLEAR);
+    EXPECT_EQ(layout.depthAttachment.stencilStoreop, VK_ATTACHMENT_STORE_OP_STORE);
+}
+
+TEST(RenderPassLayoutTest, DepthOnlyAttachmentIgnoresStencilOps) {
+    WGPUTextureViewImpl depthView;
+    initFakeTextureView(&depthView, VK_FORMAT_D32_SFLOAT);
+
+    WGPURenderPassDepthStencilAttachment depthAttachment = {};
+    depthAttachment.view = &depthView;
+    depthAttachment.depthLoadOp = WGPULoadOp_Clear;
+    depthAttachment.depthStoreOp = WGPUStoreOp_Store;
+    depthAttachment.stencilLoadOp = WGPULoadOp_Clear;
+    depthAttachment.stencilStoreOp = WGPUStoreOp_Store;
+
+    WGPURenderPassDescriptor desc = {};
+    desc.depthStencilAttachment = &depthAttachment;
+
+    RenderPassLayout layout = GetRenderPassLayout(&desc);
+
+    EXPECT_EQ(layout.depthAttachmentPresent, 1u);
+    EXPECT_EQ(layout.depthAttachment.format, VK_FORMAT_D32_SFLOAT);
+    EXPECT_EQ(layout.depthAttachment.loadop, VK_ATTACHMENT_LOAD_OP_CLEAR);
+    EXPECT_EQ(layout.depthAttachment.storeop, VK_ATTACHMENT_STORE_OP_STORE);
+    EXPECT_EQ(layout.depthAttachment.stencilLoadop, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+    EXPECT_EQ(layout.depthAttachment.stencilStoreop, VK_ATTACHMENT_STORE_OP_DONT_CARE);
+}
+
+TEST(RenderPassLayoutTest, StencilOpsParticipateInRenderPassCacheKey) {
+    WGPUTextureViewImpl depthStencilView;
+    initFakeTextureView(&depthStencilView, VK_FORMAT_D32_SFLOAT_S8_UINT);
+
+    WGPURenderPassDepthStencilAttachment loadStencilAttachment = {};
+    loadStencilAttachment.view = &depthStencilView;
+    loadStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+    loadStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+    loadStencilAttachment.stencilLoadOp = WGPULoadOp_Load;
+    loadStencilAttachment.stencilStoreOp = WGPUStoreOp_Store;
+
+    WGPURenderPassDepthStencilAttachment clearStencilAttachment = loadStencilAttachment;
+    clearStencilAttachment.stencilLoadOp = WGPULoadOp_Clear;
+
+    WGPURenderPassDescriptor loadStencilDesc = {};
+    loadStencilDesc.depthStencilAttachment = &loadStencilAttachment;
+    WGPURenderPassDescriptor clearStencilDesc = {};
+    clearStencilDesc.depthStencilAttachment = &clearStencilAttachment;
+
+    RenderPassLayout loadStencilLayout = GetRenderPassLayout(&loadStencilDesc);
+    RenderPassLayout clearStencilLayout = GetRenderPassLayout(&clearStencilDesc);
+
+    EXPECT_FALSE(renderPassLayoutCompare(loadStencilLayout, clearStencilLayout));
+    EXPECT_NE(renderPassLayoutHash(loadStencilLayout), renderPassLayoutHash(clearStencilLayout));
+}
+
 TEST_F(WebGPUTest, BufferReferenceCounting) {
     WGPUBufferDescriptor desc = {};
     desc.size = 1024;
