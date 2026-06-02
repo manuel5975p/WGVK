@@ -408,11 +408,11 @@ typedef enum WGPUPolygonMode {
     WGPUPolygonMode_Force32 = 0x7FFFFFFF
 } WGPUPolygonMode WGPU_ENUM_ATTRIBUTE;
 
-typedef enum WGPUVertexStepMode { 
-    WGPUVertexStepMode_Undefined = 0x0, 
+typedef enum WGPUVertexStepMode {
+    WGPUVertexStepMode_Undefined = 0x0,
     WGPUVertexStepMode_Vertex = 0x1,
     WGPUVertexStepMode_Instance = 0x2,
-    WGPUVertexStepMode_Force32 = 0x7FFFFFFF 
+    WGPUVertexStepMode_Force32 = 0x7FFFFFFF
 } WGPUVertexStepMode;
 
 typedef enum WGPUIndexFormat {
@@ -910,7 +910,7 @@ typedef void (*WGPUCompilationInfoCallback)(WGPUCompilationInfoRequestStatus sta
 typedef void (*WGPUCreateComputePipelineAsyncCallback)(WGPUCreatePipelineAsyncStatus status, WGPUComputePipeline pipeline, WGPUStringView message, WGPU_NULLABLE void* userdata1, WGPU_NULLABLE void* userdata2) WGPU_FUNCTION_ATTRIBUTE;
 typedef void (*WGPUCreateRenderPipelineAsyncCallback)(WGPUCreatePipelineAsyncStatus status, WGPURenderPipeline pipeline, WGPUStringView message, WGPU_NULLABLE void* userdata1, WGPU_NULLABLE void* userdata2) WGPU_FUNCTION_ATTRIBUTE;
 typedef void (*WGPUPopErrorScopeCallback)(WGPUPopErrorScopeStatus status, WGPUErrorType type, WGPUStringView message, WGPU_NULLABLE void* userdata1, WGPU_NULLABLE void* userdata2) WGPU_FUNCTION_ATTRIBUTE;
-typedef void (*WGPUQueueWorkDoneCallback)(WGPUQueueWorkDoneStatus status, WGPU_NULLABLE void* userdata1, WGPU_NULLABLE void* userdata2) WGPU_FUNCTION_ATTRIBUTE;
+typedef void (*WGPUQueueWorkDoneCallback)(WGPUQueueWorkDoneStatus status, WGPUStringView message, WGPU_NULLABLE void* userdata1, WGPU_NULLABLE void* userdata2) WGPU_FUNCTION_ATTRIBUTE;
 
 // Missing Structs
 typedef struct WGPUCompilationInfoCallbackInfo {
@@ -1136,9 +1136,9 @@ typedef struct WGPUSurfaceSourceDrmPlane {
     uint32_t  crtcId;
     uint32_t  planeId;
 
-    
+
     WGPUDrmModeSelect modeSelect;
-    
+
     WGPUBool acquireExclusive;
 } WGPUSurfaceSourceDrmPlane;
 
@@ -1328,7 +1328,7 @@ typedef void (*WGPUUncapturedErrorCallback)(const WGPUDevice*, WGPUErrorType, st
 
 typedef struct WGPUDeviceLostCallbackInfo {
     WGPUChainedStruct * nextInChain;
-    int mode;
+    WGPUCallbackMode mode;
     WGPUDeviceLostCallback callback;
     void* userdata1;
     void* userdata2;
@@ -1682,9 +1682,9 @@ typedef struct WGPUStencilFaceState {
 typedef struct WGPUDepthStencilState {
     WGPUChainedStruct* nextInChain;
     WGPUTextureFormat format;
-    WGPUBool32 depthWriteEnabled;
+    WGPUOptionalBool depthWriteEnabled;
     WGPUCompareFunction depthCompare;
-    
+
     WGPUStencilFaceState stencilFront;
     WGPUStencilFaceState stencilBack;
     uint32_t stencilReadMask;
@@ -2029,7 +2029,7 @@ WGVK_EXPORT void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder commandE
 WGVK_EXPORT WGPUComputePassEncoder wgpuCommandEncoderBeginComputePass(WGPUCommandEncoder enc, const WGPUComputePassDescriptor* cpdesc);
 WGVK_EXPORT void wgpuComputePassEncoderEnd(WGPUComputePassEncoder commandEncoder);
 WGVK_EXPORT WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder enc, const WGPURenderPassDescriptor* rpdesc);
-    
+
 WGVK_EXPORT void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container);
 WGVK_EXPORT void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer source, WGPURayTracingAccelerationContainer dest);
 WGVK_EXPORT void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container);
