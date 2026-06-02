@@ -203,6 +203,8 @@ TEST(RenderPassLayoutTest, StencilOpsParticipateInRenderPassCacheKey) {
 
     EXPECT_FALSE(renderPassLayoutCompare(loadStencilLayout, clearStencilLayout));
     EXPECT_NE(renderPassLayoutHash(loadStencilLayout), renderPassLayoutHash(clearStencilLayout));
+}
+
 TEST(WGPUApiValidation, SurfaceGetCapabilitiesRejectsNullArgsAndClearsOutput) {
     WGPUSurfaceCapabilities caps = {};
     caps.formatCount = 123;
