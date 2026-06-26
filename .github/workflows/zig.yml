@@ -1,6 +1,7 @@
 name: Zig CI (Multiplatform)
 
 on:
+  workflow_dispatch:
   push:
     branches: ["*"]
   pull_request:
@@ -33,7 +34,6 @@ jobs:
         with:
           version: 0.15.1
 
-      # TODO: Add tests and examples
       - name: Build Lib for ${{ matrix.target }}
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseFast --verbose
 
@@ -41,9 +41,19 @@ jobs:
         if: runner.os == 'Windows'
         run: zig build -Dtarget=x86_64-windows-msvc -Doptimize=ReleaseFast --verbose --prefix ./zig-out/x86_64-windows
 
+      - name: Set up Android SDK/NDK
+        if: runner.os == 'Linux'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "ndk;27.3.13750724 platforms;android-29"
+
       - name: Cross Compile
         if: runner.os == 'Linux'
         run: zig build -Doptimize=ReleaseFast all --verbose
+
+      - name: Build Android Example
+        if: runner.os == 'Linux'
+        run: zig build -Doptimize=ReleaseFast android-example --verbose
 
       - name: Build Examples Linux
         if: runner.os == 'Linux'

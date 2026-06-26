@@ -1,4 +1,5 @@
 const std = @import("std");
+const AndroidSdk = @import("zig_android").Sdk;
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -43,24 +44,29 @@ pub fn build(b: *std.Build) !void {
         .{ .cpu_arch = .aarch64, .os_tag = .macos },
         .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
         .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .musl },
+        .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .android },
         .{ .cpu_arch = .x86_64, .os_tag = .windows },
         .{ .cpu_arch = .x86_64, .os_tag = .macos },
         .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
         .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .musl },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .android },
         .{ .cpu_arch = .aarch64, .os_tag = .ios, .os_version_min = ios_min_version },
         .{ .cpu_arch = .aarch64, .os_tag = .ios, .abi = .simulator, .os_version_min = ios_min_version },
         .{ .cpu_arch = .x86_64, .os_tag = .ios, .abi = .simulator, .os_version_min = ios_min_version },
     };
     for (build_targets) |t| {
         const resolved_target = b.resolveTargetQuery(t);
-        const lib = try buildLib(b, .{
+        const lib = buildLib(b, .{
             .target = resolved_target,
             .optimize = optimize,
             .use_vma = use_vma,
             .support_drm = support_drm,
             .enable_x11 = enable_x11,
             .enable_wayland = enable_wayland,
-        });
+        }) catch |err| switch (err) {
+            error.UnsupportedTarget => continue,
+            else => |e| return e,
+        };
         const target_output = b.addInstallArtifact(lib, .{
             .dest_dir = .{
                 .override = .{
@@ -70,6 +76,67 @@ pub fn build(b: *std.Build) !void {
         });
         build_all_step.dependOn(&target_output.step);
     }
+
+    // Android APK example
+    const android_step = b.step("android-example", "Build Android example APK");
+    var sdk = AndroidSdk.init(b, 29);
+    const app = try sdk.createApp(.{
+        .manifest = .{
+            .package = "com.wgvk.example",
+            .uses_sdk = .{
+                .android_minSdkVersion = 29,
+                .android_targetSdkVersion = 35,
+            },
+            .application = .{
+                .android_label = "WGVK Clear",
+                .android_hasCode = false,
+                .activity = &.{.{
+                    .android_name = "android.app.NativeActivity",
+                    .android_exported = true,
+                    .android_configChanges = &.{ .orientation, .keyboardHidden, .screenSize },
+                    .meta_data = &.{.{
+                        .android_name = "android.app.lib_name",
+                        .android_value = "wgvk_android_clear",
+                    }},
+                    .intent_filter = &.{AndroidSdk.Application.Manifest.IntentFilter.main_launcher},
+                }},
+            },
+        },
+    });
+
+    const android_targets: []const std.Target.Query = &.{
+        .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .android },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .android },
+    };
+    for (android_targets) |t| {
+        const resolved = b.resolveTargetQuery(t);
+        const wgvk_android = buildLib(b, .{
+            .target = resolved,
+            .optimize = optimize,
+            .use_vma = use_vma,
+            .support_drm = false,
+            .enable_x11 = false,
+            .enable_wayland = false,
+        }) catch continue;
+
+        const lib = app.addLibrary(.{
+            .name = "wgvk_android_clear",
+            .root_module = b.createModule(.{
+                .target = resolved,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        lib.root_module.addIncludePath(b.path("include"));
+        lib.root_module.addCSourceFile(.{
+            .file = b.path("examples/android_clear.c"),
+            .flags = &.{"-std=c11"},
+        });
+        lib.root_module.linkLibrary(wgvk_android);
+    }
+
+    const apk = app.addInstallApk(".");
+    android_step.dependOn(&apk.step);
 }
 
 const WgvkOptions = struct {
@@ -107,6 +174,7 @@ fn buildLib(b: *std.Build, options: WgvkOptions) !*std.Build.Step.Compile {
         wgvk_mod.link_libcpp = true;
     }
 
+    var is_android = false;
     switch (options.target.result.os.tag) {
         .windows => {
             wgvk_mod.addCMacro("SUPPORT_WIN32_SURFACE", "1");
@@ -122,26 +190,40 @@ fn buildLib(b: *std.Build, options: WgvkOptions) !*std.Build.Step.Compile {
             wgvk_mod.linkFramework("QuartzCore", .{});
         },
         else => {
-            const is_android = options.target.result.abi.isAndroid();
-            if (!is_android and options.support_drm) {
-                wgvk_mod.addCMacro("SUPPORT_DRM_SURFACE", "1");
-            }
+            is_android = options.target.result.abi.isAndroid();
+            if (is_android) {
+                wgvk_mod.addCMacro("SUPPORT_ANDROID_SURFACE", "1");
+            } else {
+                if (options.support_drm) {
+                    wgvk_mod.addCMacro("SUPPORT_DRM_SURFACE", "1");
+                }
 
-            if (!is_android and options.enable_x11) if (b.lazyDependency("x11_headers", .{})) |x11| {
-                wgvk_mod.addCMacro("SUPPORT_XLIB_SURFACE", "1");
-                wgvk_mod.linkLibrary(x11.artifact("x11-headers"));
-            };
-            if (options.enable_wayland) if (b.lazyDependency("wayland_headers", .{})) |wayland| {
-                wgvk_mod.addCMacro("SUPPORT_WAYLAND_SURFACE", "1");
-                wgvk_mod.addIncludePath(wayland.path("wayland"));
-            };
+                if (options.enable_x11) if (b.lazyDependency("x11_headers", .{})) |x11| {
+                    wgvk_mod.addCMacro("SUPPORT_XLIB_SURFACE", "1");
+                    wgvk_mod.linkLibrary(x11.artifact("x11-headers"));
+                };
+                if (options.enable_wayland) if (b.lazyDependency("wayland_headers", .{})) |wayland| {
+                    wgvk_mod.addCMacro("SUPPORT_WAYLAND_SURFACE", "1");
+                    wgvk_mod.addIncludePath(wayland.path("wayland"));
+                };
+            }
         },
     }
 
-    const wgvk_lib = b.addLibrary(.{
-        .name = "wgvk",
-        .root_module = wgvk_mod,
-    });
+    const wgvk_lib =
+        if (!is_android)
+            b.addLibrary(.{
+                .name = "wgvk",
+                .root_module = wgvk_mod,
+            })
+        else blk: {
+            var android = AndroidSdk.init(b, 29);
+            break :blk android.addLibrary(.{
+                .name = "wgvk",
+                .root_module = wgvk_mod,
+            });
+        };
+
     wgvk_lib.installHeadersDirectory(b.path("./include/webgpu"), "webgpu", .{});
     wgvk_lib.installHeader(b.path("./include/wgvk.h"), "wgvk.h");
     wgvk_lib.installHeader(b.path("./include/wgvk_config.h"), "wgvk_config.h");
