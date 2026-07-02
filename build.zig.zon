@@ -6,23 +6,23 @@
     .fingerprint = 0xfa41188e5ce82b6,
     .dependencies = .{
         .xcode_frameworks = .{
-            .url = "git+https://github.com/shreyassanthu77/xcode-frameworks.git#d9de76b40c979eb425aad0e365fe57b676b5d6f6",
-            .hash = "N-V-__8AADOnqgUlgd1Wb1ddIDiG1EHw03m7SlLXNpLWgejt",
+            .url = "git+https://github.com/shreyassanthu77/xcode-frameworks.git#62f660e82e4eddb5007cb4cf06a6d3d31237f05e",
+            .hash = "N-V-__8AAMikhQnOIqoH0uy5aepJKs8Zy0VqznnW3n94VSZN",
             .lazy = true,
         },
         .x11_headers = .{
-            .url = "git+https://github.com/AshishBhattarai/x11-headers#661167b237dabdbb5eb121ec3a01bb8ccbae3151",
-            .hash = "N-V-__8AAH_nQQBttmU7jRZ0CGYKGA917MrX9zX7S5GrxrMA",
+            .url = "https://github.com/Batres3/x11-headers/archive/d85c0aed3f1ecc138c994ae00bb745c4cba9e574.zip",
+            .hash = "N-V-__8AAIyUQgB3B5VLoRxZ6OIasJUeaUSD3c6U2Tjhe7TZ",
             .lazy = true,
         },
         .wayland_headers = .{
-            .url = "git+https://github.com/shreyassanthu77/wayland-headers.git#bf463e018b9e36974898ce31b92f8a031eea45a2",
-            .hash = "N-V-__8AAGn4CgBM_vzz1o5HRh08JarL3_6N6-VV9XJBgigL",
+            .url = "https://github.com/Batres3/wayland-headers/archive/190b247ebc85546752dcf0255070fe835e2262b8.tar.gz",
+            .hash = "N-V-__8AALvXCgD7AaGEzoGpZFSnomVUd9osYPJN3P4jxxj9",
             .lazy = true,
         },
         .glfw = .{
-            .url = "git+https://github.com/shreyassanthu77/glfw-zig.git#1858deeea9b352345884b9d1c377ff83852a5668",
-            .hash = "glfw-0.0.0-R5AeUpIJGgDNDgvw7sqn2y1tzwhnNnIoKNJHjUuX6pU1",
+            .url = "git+https://github.com/shreyassanthu77/glfw-zig.git#3d4b046938a3508e7dfe3f5de5ce6b4b450d6895",
+            .hash = "glfw-0.0.0-R5AeUpIJGgBBORlw5iznqTvDb1QW_nDCejzyMlqIbIJQ",
             .lazy = true,
         },
     },
