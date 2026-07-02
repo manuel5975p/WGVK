@@ -7,6 +7,8 @@ pub fn build(b: *std.Build) !void {
     const support_drm = b.option(bool, "drm", "Support Direct Rendering Infrastructure Surfaces (Linux)") orelse false;
     const enable_x11 = b.option(bool, "x11", "Enable X11 support") orelse true;
     const enable_wayland = b.option(bool, "wayland", "Enable Wayland support") orelse true;
+    // leave false so library consumers don't get the glfw dependency for them
+    const include_glfw_example = b.option(bool, "glfw", "Include glfw example") orelse false;
     const wgvk_options = WgvkOptions{
         .target = target,
         .optimize = optimize,
@@ -23,12 +25,13 @@ pub fn build(b: *std.Build) !void {
     const examples: []const []const u8 = &.{
         "asynchronous_loading",
         "basic_compute",
-        "glfw_surface",
+        if (include_glfw_example) "glfw_surface" else "",
         "multi_submit",
         "rgfw_surface",
     };
     for (examples) |src| {
-        const example_output = buildExample(b, wgvk_options, wgvk_lib, src) catch continue;
+        if (src.len == 0) continue;
+        const example_output = buildExample(b, wgvk_options, wgvk_lib, src, include_glfw_example) catch continue;
         examples_step.dependOn(&example_output.step);
     }
 
@@ -154,6 +157,7 @@ fn buildExample(
     options: WgvkOptions,
     wgvk_lib: *std.Build.Step.Compile,
     example: []const u8,
+    glfw_enabled: bool,
 ) !*std.Build.Step.InstallArtifact {
     const example_exe = b.addExecutable(.{
         .name = example,
@@ -179,13 +183,15 @@ fn buildExample(
     });
     example_exe.root_module.linkLibrary(wgvk_lib);
 
-    if (b.lazyDependency("glfw", .{
-        .target = options.target,
-        .optimize = options.optimize,
-        .x11 = options.enable_x11,
-        .wayland = options.enable_wayland,
-    })) |glfw| {
-        example_exe.root_module.linkLibrary(glfw.artifact("glfw"));
+    if (glfw_enabled) {
+        if (b.lazyDependency("glfw", .{
+            .target = options.target,
+            .optimize = options.optimize,
+            .x11 = options.enable_x11,
+            .wayland = options.enable_wayland,
+        })) |glfw| {
+            example_exe.root_module.linkLibrary(glfw.artifact("glfw"));
+        }
     }
 
     switch (options.target.result.os.tag) {
