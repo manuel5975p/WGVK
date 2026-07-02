@@ -50,7 +50,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y libwayland-dev libx11-dev libxrandr-dev
-          zig build -Doptimize=ReleaseFast examples -Dglfw --verbose
+          zig build -Doptimize=ReleaseFast examples --verbose
 
       - name: Build iOS Targets
         if: runner.os == 'macOS'
@@ -61,4 +61,4 @@ jobs:
 
       - name: Build Examples (non-Linux)
         if: runner.os != 'Linux'
-        run: zig build -Doptimize=ReleaseFast examples -Dglfw --verbose
+        run: zig build -Doptimize=ReleaseFast examples --verbose
