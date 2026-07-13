@@ -93,6 +93,25 @@ std::string formatFullType(const json& j, const std::string& type_key, const std
     return prefix + type_str + suffix;
 }
 
+// Block prefix added to tagged enum values, mirroring Dawn's dawn_json_generator.py:
+// dawn -> 0x00050000, else emscripten -> 0x00040000, else native -> 0x00010000.
+// Untagged (core) and wgvk-tagged values carry their absolute value already.
+uint32_t enumTagPrefix(const json& node) {
+    if (!node.contains("tags") || !node["tags"].is_array()) return 0;
+    bool dawn = false, emscripten = false, native = false;
+    for (const auto& tag : node["tags"]) {
+        if (!tag.is_string()) continue;
+        const std::string s = tag.get<std::string>();
+        dawn |= (s == "dawn");
+        emscripten |= (s == "emscripten");
+        native |= (s == "native");
+    }
+    if (dawn) return 0x00050000;
+    if (emscripten) return 0x00040000;
+    if (native) return 0x00010000;
+    return 0;
+}
+
 bool hasExcludedTag(const json& node, const std::unordered_set<std::string>& excluded_tags) {
     if (node.is_null() || !node.contains("tags")) {
         return false;
@@ -226,7 +245,7 @@ int main(int argc, char* argv[]) {
     std::cout << "#include <stdint.h>\n";
     std::cout << "#include <stddef.h>\n\n";
     std::cout << "typedef uint32_t WGPUBool;\n";
-    std::cout << "typedef uint32_t WGPUFlags;\n\n";
+    std::cout << "typedef uint64_t WGPUFlags;\n\n";
 
     for(const auto& key : generation_order) {
         const auto& value = root[key];
@@ -252,7 +271,7 @@ int main(int argc, char* argv[]) {
         if (hasExcludedTag(value, excluded_tags)) continue;
         std::string category = value.value("category", "");
 
-        if (category == "enum" || category == "bitmask") {
+        if (category == "enum") {
             std::string enum_name = types[key].name;
             std::cout << "typedef enum " << enum_name << " {\n";
             if (value.contains("values")) {
@@ -261,15 +280,25 @@ int main(int argc, char* argv[]) {
                     std::string member_name_str = enum_value["name"];
                     std::replace(member_name_str.begin(), member_name_str.end(), '-', ' ');
                     std::string member_name = toPascalCase(member_name_str);
-                    int val = enum_value["value"].get<int>();
+                    uint32_t val = enum_value["value"].get<uint32_t>() + enumTagPrefix(enum_value);
                     std::cout << "    " << enum_name << "_" << member_name << " = 0x" << std::hex << std::setw(8) << std::setfill('0') << val << std::dec << ",\n";
                 }
             }
             std::cout << "    " << enum_name << "_Force32 = 0x7FFFFFFF\n";
-            std::cout << "} " << enum_name << ";\n";
-
-            if (category == "bitmask") {
-                 std::cout << "typedef WGPUFlags " << enum_name << "Flags;\n";
+            std::cout << "} " << enum_name << ";\n\n";
+        } else if (category == "bitmask") {
+            std::string enum_name = types[key].name;
+            std::cout << "typedef WGPUFlags " << enum_name << ";\n";
+            if (value.contains("values")) {
+                for(const auto& enum_value : value["values"]) {
+                    if (hasExcludedTag(enum_value, excluded_tags)) continue;
+                    std::string member_name_str = enum_value["name"];
+                    std::replace(member_name_str.begin(), member_name_str.end(), '-', ' ');
+                    std::string member_name = toPascalCase(member_name_str);
+                    // Bitmask values are bit patterns; Dawn applies no tag prefix here.
+                    uint64_t val = enum_value["value"].get<uint64_t>();
+                    std::cout << "static const " << enum_name << " " << enum_name << "_" << member_name << " = 0x" << std::hex << std::setw(16) << std::setfill('0') << val << std::dec << ";\n";
+                }
             }
             std::cout << "\n";
         }

@@ -2991,32 +2991,42 @@ static inline VkCompositeAlphaFlagsKHR toVulkanCompositeAlphaMode(WGPUCompositeA
 }
 
 
+static inline bool isMultiplanarFormat(WGPUTextureFormat format){
+    return
+        format == WGPUTextureFormat_R8BG8Biplanar420Unorm ||
+        format == WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm ||
+        format == WGPUTextureFormat_R8BG8A8Triplanar420Unorm ||
+        format == WGPUTextureFormat_R8BG8Biplanar422Unorm ||
+        format == WGPUTextureFormat_R8BG8Biplanar444Unorm ||
+        format == WGPUTextureFormat_R10X6BG10X6Biplanar422Unorm ||
+        format == WGPUTextureFormat_R10X6BG10X6Biplanar444Unorm ||
+        format == WGPUTextureFormat_External;
+}
+
 static inline VkImageAspectFlags toVulkanAspectMask(WGPUTextureAspect aspect, WGPUTextureFormat format){
     bool depth = isDepthFormat(format);
     bool depthStencil = isDepthStencilFormat(format);
-    
-    switch(aspect){
-        case WGPUTextureAspect_All:{
-            if(depthStencil)return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            if(depth)return VK_IMAGE_ASPECT_DEPTH_BIT;
-            return VK_IMAGE_ASPECT_COLOR_BIT;
-        }
-        case WGPUTextureAspect_DepthOnly:
-        return VK_IMAGE_ASPECT_DEPTH_BIT;
-        case WGPUTextureAspect_StencilOnly:
-        return VK_IMAGE_ASPECT_STENCIL_BIT;
-        case WGPUTextureAspect_Plane0Only:
-        return VK_IMAGE_ASPECT_PLANE_0_BIT;
-        case WGPUTextureAspect_Plane1Only:
-        return VK_IMAGE_ASPECT_PLANE_1_BIT;
-        case WGPUTextureAspect_Plane2Only:
-        return VK_IMAGE_ASPECT_PLANE_2_BIT;
+    bool multiplanar = isMultiplanarFormat(format);
 
-        default: {
-            assert(false && "This aspect is not implemented");
-            return VK_IMAGE_ASPECT_COLOR_BIT;
-        }
+    if(aspect == WGPUTextureAspect_All){
+        if(depthStencil) return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        if(depth) return VK_IMAGE_ASPECT_DEPTH_BIT;
+        return VK_IMAGE_ASPECT_COLOR_BIT;
     }
+    if(aspect == WGPUTextureAspect_DepthOnly){
+        return VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    if(aspect == WGPUTextureAspect_StencilOnly){
+        return VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    if(multiplanar){
+        if(aspect == WGPUTextureAspect_Plane0Only) return VK_IMAGE_ASPECT_PLANE_0_BIT;
+        if(aspect == WGPUTextureAspect_Plane1Only) return VK_IMAGE_ASPECT_PLANE_1_BIT;
+        if(aspect == WGPUTextureAspect_Plane2Only) return VK_IMAGE_ASPECT_PLANE_2_BIT;
+    }
+
+    assert(false && "This aspect is not implemented");
+    return VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
 static inline bool isDepthFormatVk(VkFormat format){
@@ -3034,32 +3044,45 @@ static inline bool isDepthStencilFormatVk(VkFormat format){
     format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
+static inline bool isMultiplanarFormatVk(VkFormat format){
+    switch(format){
+        case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16:
+        case VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM:
+        case VK_FORMAT_G8_B8R8_2PLANE_422_UNORM:
+        case VK_FORMAT_G8_B8R8_2PLANE_444_UNORM:
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_422_UNORM_3PACK16:
+        case VK_FORMAT_G10X6_B10X6R10X6_2PLANE_444_UNORM_3PACK16:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static inline VkImageAspectFlags toVulkanAspectMaskVk(WGPUTextureAspect aspect, VkFormat format){
     bool depth = isDepthFormatVk(format);
     bool depthStencil = isDepthStencilFormatVk(format);
+    bool multiplanar = isMultiplanarFormatVk(format);
 
-    switch(aspect){
-        case WGPUTextureAspect_All:{
-            if(depthStencil)return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            if(depth)return VK_IMAGE_ASPECT_DEPTH_BIT;
-            return VK_IMAGE_ASPECT_COLOR_BIT;
-        }
-        case WGPUTextureAspect_DepthOnly:
-        return VK_IMAGE_ASPECT_DEPTH_BIT;
-        case WGPUTextureAspect_StencilOnly:
-        return VK_IMAGE_ASPECT_STENCIL_BIT;
-        case WGPUTextureAspect_Plane0Only:
-        return VK_IMAGE_ASPECT_PLANE_0_BIT;
-        case WGPUTextureAspect_Plane1Only:
-        return VK_IMAGE_ASPECT_PLANE_1_BIT;
-        case WGPUTextureAspect_Plane2Only:
-        return VK_IMAGE_ASPECT_PLANE_2_BIT;
-
-        default: {
-            assert(false && "This aspect is not implemented");
-            return VK_IMAGE_ASPECT_COLOR_BIT;
-        }
+    if(aspect == WGPUTextureAspect_All){
+        if(depthStencil) return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        if(depth) return VK_IMAGE_ASPECT_DEPTH_BIT;
+        return VK_IMAGE_ASPECT_COLOR_BIT;
     }
+    if(aspect == WGPUTextureAspect_DepthOnly){
+        return VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    if(aspect == WGPUTextureAspect_StencilOnly){
+        return VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    if(multiplanar){
+        if(aspect == WGPUTextureAspect_Plane0Only) return VK_IMAGE_ASPECT_PLANE_0_BIT;
+        if(aspect == WGPUTextureAspect_Plane1Only) return VK_IMAGE_ASPECT_PLANE_1_BIT;
+        if(aspect == WGPUTextureAspect_Plane2Only) return VK_IMAGE_ASPECT_PLANE_2_BIT;
+    }
+
+    assert(false && "This aspect is not implemented");
+    return VK_IMAGE_ASPECT_COLOR_BIT;
 }
 // Inverse conversion: Vulkan usage flags -> WGPUTextureUsage flags
 static inline WGPUTextureUsage fromVulkanWGPUTextureUsage(VkImageUsageFlags vkUsage) {
