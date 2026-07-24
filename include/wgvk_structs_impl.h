@@ -2044,6 +2044,7 @@ typedef struct WGPUBindGroupLayoutImpl{
     WGPUDevice device;
     WGPUBindGroupLayoutEntry* entries;
     uint32_t entryCount;
+    WGPUBool bindless;
 
     refcount_type refCount;
 }WGPUBindGroupLayoutImpl;
@@ -2210,6 +2211,11 @@ typedef struct WGVKCapabilities{
     WGPUBool dynamicRendering;
     WGPUBool depthClipEnable;
     WGPUBool depthClipControl;
+    WGPUBool bindlessDescriptors;      // general partial-bound/runtime-array infrastructure
+    WGPUBool bindlessBuffers;          // storage/uniform buffer arrays
+    WGPUBool bindlessSampledImages;    // sampled image and sampler arrays
+    WGPUBool bindlessStorageImages;    // storage image arrays
+    WGPUBool nullDescriptor;
 }WGVKCapabilities;
 
 typedef struct FIFCache{
