@@ -11467,6 +11467,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
     WGPURayTracingAccelerationContainer ret = RL_CALLOC(1, sizeof(WGPURayTracingAccelerationContainerImpl));
     ret->level = descriptor->level;
     ret->device = device;
+    ret->refCount = 1;
 
     // For BLAS, geometryCount is the number of meshes.
     // For TLAS, geometryCount is 1 (A single geometry of type INSTANCES containing N primitives).
@@ -11738,6 +11739,44 @@ void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder en
 void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container){
     ENTRY();
 
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerAddRef(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    ++container->refCount;
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerRelease(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    if(--container->refCount == 0){
+        WGPUDevice device = container->device;
+
+        device->functions.vkDestroyAccelerationStructureKHR(device->device, container->accelerationStructure, NULL);
+
+        for(uint32_t i = 0; i < container->geometryCount; i++){
+            if(container->inputGeometryBuffers && container->inputGeometryBuffers[i]){
+                wgpuBufferRelease(container->inputGeometryBuffers[i]);
+            }
+        }
+        RL_FREE(container->inputGeometryBuffers);
+        RL_FREE(container->geometries);
+        RL_FREE(container->buildRangeInfos);
+        RL_FREE(container->primitiveCounts);
+
+        if(container->instanceBuffer){
+            wgpuBufferRelease(container->instanceBuffer);
+        }
+        if(container->updateScratchBuffer){
+            wgpuBufferRelease(container->updateScratchBuffer);
+        }
+        wgpuBufferRelease(container->accelerationStructureBuffer);
+        wgpuBufferRelease(container->buildScratchBuffer);
+
+        wgpuDeviceRelease(device);
+        RL_FREE(container);
+    }
     EXIT();
 }
 
