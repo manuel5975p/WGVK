@@ -1,3 +1,51 @@
+//! # Usage
+//! The intended way to use this library is as follows:
+//! 1. Add this library to your project as a dependency.
+//!     ```bash
+//!     zig fetch --save git+https://github.com/manuel5975p/WGVK#<commit-or-tag>
+//!     ```
+//! 2. Add the following to your build.zig file:
+//!     ```zig
+//!     const wgvk = @import("WGVK"); // the name of the dependency as defined in your build.zig.zon file
+//!
+//!     pub fn build(b: *std.Build) !void {
+//!         // other build steps
+//!         const wgvk_lib = wgvk.buildLib(b, .{
+//!             .target = target,
+//!             .optimize = optimize,
+//!             // other optional features
+//!             .use_vma = use_vma, // use GPUOpen's VMA allocator (Requires and links libc++)
+//!             .support_drm = support_drm, // support Direct Rendering Infrastructure Surfaces (Linux)
+//!             .enable_x11 = enable_x11, // enable X11 support (Requires system libX11-dev. Enable on Linux only.)
+//!             .enable_wayland = enable_wayland, // enable Wayland support (Requires system libwayland-client. Enable on Linux only.)
+//!         });
+//!
+//!         switch (target.result.os.tag) {
+//!             .windows => {
+//!                 exe.root_module.linkSystemLibrary("gdi32", .{});
+//!             },
+//!             .macos => {
+//!                 // see below for more details on how to cross-compile to macos
+//!                 exe.root_module.linkFramework("Foundation", .{});
+//!                 exe.root_module.linkFramework("Metal", .{});
+//!                 exe.root_module.linkFramework("Cocoa", .{});
+//!             },
+//!             .linux => {
+//!                 const is_android = target.result.abi.isAndroid();
+//!                 if (!is_android and enable_x11) {
+//!                     exe.root_module.linkSystemLibrary("X11", .{});
+//!                     exe.root_module.linkSystemLibrary("Xrandr", .{});
+//!                 }
+//!                 if (!is_android and enable_wayland) {
+//!                     exe.root_module.linkSystemLibrary("wayland-client", .{});
+//!                 }
+//!             },
+//!             else => return error.UnsupportedPlatform,
+//!         }
+//!
+//!         exe.root_module.linkLibrary(wgvk_lib);
+//!     }
+//!     ```
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
@@ -57,6 +105,9 @@ pub fn build(b: *std.Build) !void {
     };
     for (build_targets) |t| {
         const resolved_target = b.resolveTargetQuery(t);
+        // skip iOS targets on non macOS hosts
+        if (resolved_target.result.os.tag == .ios and b.graph.host.result.os.tag != .macos) continue;
+
         const lib = try buildLib1(b, .{
             .target = resolved_target,
             .optimize = optimize,
@@ -124,15 +175,18 @@ fn buildLib1(b: *std.Build, options: WgvkOptions) !*std.Build.Step.Compile {
         .windows => {
             wgvk_mod.addCMacro("SUPPORT_WIN32_SURFACE", "1");
         },
-        .macos, .ios => {
-            if (b.lazyDependency("xcode_frameworks", .{})) |frameworks| {
-                wgvk_mod.addSystemFrameworkPath(frameworks.path("Frameworks"));
-                wgvk_mod.addSystemIncludePath(frameworks.path("include"));
-                wgvk_mod.addLibraryPath(frameworks.path("lib"));
-            }
+        .macos => {
             wgvk_mod.addCMacro("SUPPORT_METAL_SURFACE", "1");
-            wgvk_mod.linkFramework("Metal", .{});
-            wgvk_mod.linkFramework("QuartzCore", .{});
+        },
+        .ios => {
+            wgvk_mod.addCMacro("SUPPORT_METAL_SURFACE", "1");
+            // When the user/CI passes --sysroot (e.g. iphoneos SDK), wire it into
+            // the C module. Zig does not automatically add $sysroot/usr/include.
+            if (b.sysroot) |sysroot| {
+                wgvk_mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
+                wgvk_mod.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
+                wgvk_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/lib" }) });
+            }
         },
         else => {
             const is_android = options.target.result.abi.isAndroid();
@@ -140,14 +194,12 @@ fn buildLib1(b: *std.Build, options: WgvkOptions) !*std.Build.Step.Compile {
                 wgvk_mod.addCMacro("SUPPORT_DRM_SURFACE", "1");
             }
 
-            if (!is_android and options.enable_x11) if (b.lazyDependency("x11_headers", .{})) |x11| {
+            if (!is_android and options.enable_x11) {
                 wgvk_mod.addCMacro("SUPPORT_XLIB_SURFACE", "1");
-                wgvk_mod.linkLibrary(x11.artifact("x11-headers"));
-            };
-            if (options.enable_wayland) if (b.lazyDependency("wayland_headers", .{})) |wayland| {
+            }
+            if (!is_android and options.enable_wayland) {
                 wgvk_mod.addCMacro("SUPPORT_WAYLAND_SURFACE", "1");
-                wgvk_mod.addIncludePath(wayland.path("wayland"));
-            };
+            }
         },
     }
 
@@ -192,46 +244,30 @@ fn buildExample(
     });
     example_exe.root_module.linkLibrary(wgvk_lib);
 
-    if (b.lazyDependency("glfw", .{
-        .target = options.target,
-        .optimize = options.optimize,
-        .x11 = options.enable_x11,
-        .wayland = options.enable_wayland,
-    })) |glfw| {
-        example_exe.root_module.linkLibrary(glfw.artifact("glfw"));
+    if (std.mem.eql(u8, example, "glfw_surface")) {
+        // Linux/macOS ship libglfw; Windows prebuilts use glfw3.
+        const glfw_name = if (options.target.result.os.tag == .windows) "glfw3" else "glfw";
+        example_exe.root_module.linkSystemLibrary(glfw_name, .{});
     }
 
     switch (options.target.result.os.tag) {
         .windows => {
-            example_exe.root_module.addCMacro("SUPPORT_WIN32_SURFACE", "1");
+            example_exe.root_module.linkSystemLibrary("gdi32", .{});
         },
         .macos => {
-            if (b.lazyDependency("xcode_frameworks", .{})) |frameworks| {
-                example_exe.root_module.addSystemFrameworkPath(frameworks.path("Frameworks"));
-                example_exe.root_module.addSystemIncludePath(frameworks.path("include"));
-                example_exe.root_module.addLibraryPath(frameworks.path("lib"));
-            }
-            example_exe.root_module.addCMacro("SUPPORT_METAL_SURFACE", "1");
+            example_exe.root_module.linkFramework("Foundation", .{});
             example_exe.root_module.linkFramework("Metal", .{});
-            example_exe.root_module.linkFramework("QuartzCore", .{});
-            example_exe.root_module.linkFramework("CoreVideo", .{});
             example_exe.root_module.linkFramework("Cocoa", .{});
-            example_exe.root_module.linkFramework("OpenGL", .{});
-            example_exe.root_module.linkFramework("IOKit", .{});
         },
         .linux => {
             const is_android = options.target.result.abi.isAndroid();
-            if (!is_android and options.enable_x11) if (b.lazyDependency("x11_headers", .{})) |x11| {
-                example_exe.root_module.addCMacro("SUPPORT_XLIB_SURFACE", "1");
-                example_exe.root_module.linkLibrary(x11.artifact("x11-headers"));
+            if (!is_android and options.enable_x11) {
                 example_exe.root_module.linkSystemLibrary("X11", .{});
                 example_exe.root_module.linkSystemLibrary("Xrandr", .{});
-            };
-            if (!is_android and options.enable_wayland) if (b.lazyDependency("wayland_headers", .{})) |wayland| {
-                example_exe.root_module.addCMacro("SUPPORT_WAYLAND_SURFACE", "1");
-                example_exe.root_module.addIncludePath(wayland.path("wayland"));
+            }
+            if (!is_android and options.enable_wayland) {
                 example_exe.root_module.linkSystemLibrary("wayland-client", .{});
-            };
+            }
         },
         .ios => {
             return error.UnsupportedPlatform;
