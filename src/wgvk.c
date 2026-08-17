@@ -3542,6 +3542,22 @@ WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGP
 
     if(entryCount > 0){
         memcpy(entriesCopy, entries, entryCount * sizeof(WGPUBindGroupLayoutEntry));
+
+        for(uint32_t i = 0;i < entryCount;i++){
+            const WGPUChainedStruct* chain = entries[i].nextInChain;
+            entriesCopy[i].nextInChain = NULL;
+            while(chain != NULL){
+                if(chain->sType == WGPUSType_BindGroupLayoutEntryRayTracing){
+                    WGPUBindGroupLayoutEntryRayTracing* chainCopy =
+                        (WGPUBindGroupLayoutEntryRayTracing*)RL_CALLOC(1, sizeof(WGPUBindGroupLayoutEntryRayTracing));
+                    *chainCopy = *(const WGPUBindGroupLayoutEntryRayTracing*)chain;
+                    chainCopy->chain.next = NULL;
+                    entriesCopy[i].nextInChain = (WGPUChainedStruct*)chainCopy;
+                    break;
+                }
+                chain = chain->next;
+            }
+        }
     }
     ret->entries = entriesCopy;
 
@@ -6197,6 +6213,11 @@ WGPUBindGroupLayout wgpuBindGroupLayoutRelease_withReturn(WGPUBindGroupLayout bg
             }
         }
         device->functions.vkDestroyDescriptorSetLayout(bglayout->device->device, bglayout->layout, NULL);
+        for(uint32_t i = 0;i < bglayout->entryCount;i++){
+            if(bglayout->entries[i].nextInChain){
+                RL_FREE((void*)bglayout->entries[i].nextInChain);
+            }
+        }
         RL_FREE((void*)bglayout->entries);
         RL_FREE((void*)bglayout);
         return NULL;
@@ -11126,11 +11147,17 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
     ret->shaderStageCount = descriptor->stageCount;
     ret->shaderStages = RL_CALLOC(descriptor->stageCount, sizeof(VkPipelineShaderStageCreateInfo));
     for(uint32_t i = 0;i < descriptor->stageCount;i++){
+        VkShaderModule vkModule = VK_NULL_HANDLE;
+        if(descriptor->stages[i].module->vulkanModuleMultiEP){
+            vkModule = descriptor->stages[i].module->vulkanModuleMultiEP;
+        }
+        else{
+            vkModule = descriptor->stages[i].module->modules[wgpuShaderStageToEnum(descriptor->stages[i].stage)].module;
+        }
         ret->shaderStages[i] = CLITERAL(VkPipelineShaderStageCreateInfo){
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = toVulkanShaderStageBits(descriptor->stages[i].stage),
-            .module = descriptor->stages[i].module->modules[wgpuShaderStageToEnum(descriptor->stages[i].stage)].module,
-            //.pName = descriptor->stages[i].module->modules[wgpuShaderStageToEnum(descriptor->stages[i].stage)].epName,
+            .module = vkModule,
             .pName = "main",
         };
     }
