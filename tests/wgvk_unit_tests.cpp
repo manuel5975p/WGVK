@@ -6184,6 +6184,109 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
     free(qs);
 }
 
+TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
+    float aabb[6] = { 0,0,0, 1,1,1 };
+    WGPUBufferDescriptor aabbDesc = {};
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.size = sizeof(aabb);
+    WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
+    ASSERT_NE(aabbBuffer, nullptr);
+    wgpuQueueWriteBuffer(queue, aabbBuffer, 0, aabb, sizeof(aabb));
+
+    WGPURayTracingAccelerationGeometryDescriptor geom = {};
+    geom.type = WGPURayTracingAccelerationGeometryType_AABBs;
+    geom.aabb.buffer = aabbBuffer;
+    geom.aabb.count = 1;
+    geom.aabb.stride = sizeof(float) * 6;
+
+    WGPURayTracingAccelerationContainerDescriptor blasDesc = {};
+    blasDesc.level = WGPURayTracingAccelerationContainerLevel_Bottom;
+    blasDesc.geometryCount = 1;
+    blasDesc.geometries = &geom;
+    WGPURayTracingAccelerationContainer blas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &blasDesc);
+    ASSERT_NE(blas, nullptr);
+
+    uint32_t preRefCount = blas->refCount;
+
+    WGPUBindGroupLayoutEntryRayTracing rtLayout = {};
+    rtLayout.chain.sType = WGPUSType_BindGroupLayoutEntryRayTracing;
+    rtLayout.accelerationStructure = 1;
+    WGPUBindGroupLayoutEntry layoutEntry = {};
+    layoutEntry.nextInChain = &rtLayout.chain;
+    layoutEntry.binding = 0;
+    layoutEntry.visibility = WGPUShaderStage_RayGen;
+    WGPUBindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 1;
+    bglDesc.entries = &layoutEntry;
+    WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    ASSERT_NE(layout, nullptr);
+
+    WGPUBindGroupEntryRayTracing rtEntry = {};
+    rtEntry.chain.sType = WGPUSType_BindGroupEntryRayTracing;
+    rtEntry.accelerationStructure = blas;
+    WGPUBindGroupEntry bgEntry = {};
+    bgEntry.nextInChain = &rtEntry.chain;
+    bgEntry.binding = 0;
+    WGPUBindGroupDescriptor bgDesc = {};
+    bgDesc.layout = layout;
+    bgDesc.entryCount = 1;
+    bgDesc.entries = &bgEntry;
+    WGPUBindGroup bg = wgpuDeviceCreateBindGroup(device, &bgDesc);
+    ASSERT_NE(bg, nullptr);
+
+    // BindGroup tracks the acceleration structure -- refCount increased.
+    EXPECT_GT((uint32_t)blas->refCount, preRefCount)
+        << "BindGroup should AddRef the acceleration structure via ResourceUsage tracking";
+
+    // Releasing the BindGroup must drop that reference (releaseAllAndClear).
+    wgpuBindGroupRelease(bg);
+    EXPECT_EQ((uint32_t)blas->refCount, preRefCount)
+        << "releaseAllAndClear must release referenced acceleration structures";
+
+    wgpuRayTracingAccelerationContainerRelease(blas);
+    wgpuBindGroupLayoutRelease(layout);
+    wgpuBufferRelease(aabbBuffer);
+}
+
+TEST_F(WebGPUTest, AccelerationStructureBuildHoldsReference) {
+    float aabb[6] = { 0,0,0, 1,1,1 };
+    WGPUBufferDescriptor aabbDesc = {};
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.size = sizeof(aabb);
+    WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
+    ASSERT_NE(aabbBuffer, nullptr);
+    wgpuQueueWriteBuffer(queue, aabbBuffer, 0, aabb, sizeof(aabb));
+
+    WGPURayTracingAccelerationGeometryDescriptor geom = {};
+    geom.type = WGPURayTracingAccelerationGeometryType_AABBs;
+    geom.aabb.buffer = aabbBuffer;
+    geom.aabb.count = 1;
+    geom.aabb.stride = sizeof(float) * 6;
+
+    WGPURayTracingAccelerationContainerDescriptor blasDesc = {};
+    blasDesc.level = WGPURayTracingAccelerationContainerLevel_Bottom;
+    blasDesc.geometryCount = 1;
+    blasDesc.geometries = &geom;
+    WGPURayTracingAccelerationContainer blas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &blasDesc);
+    ASSERT_NE(blas, nullptr);
+
+    uint32_t preRefCount = blas->refCount;
+
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderBuildRayTracingAccelerationContainer(enc, blas);
+    WGPUCommandBuffer cbuf = wgpuCommandEncoderFinish(enc, nullptr);
+    wgpuQueueSubmit(queue, 1, &cbuf);   // build in flight
+    wgpuCommandEncoderRelease(enc);
+    wgpuCommandBufferRelease(cbuf);
+
+    EXPECT_GT((uint32_t)blas->refCount, preRefCount)
+        << "recording a build should keep the acceleration structure alive until it completes";
+
+    wgpuQueueWaitIdle(queue);
+    wgpuRayTracingAccelerationContainerRelease(blas);
+    wgpuBufferRelease(aabbBuffer);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
