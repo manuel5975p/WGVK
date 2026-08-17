@@ -8429,6 +8429,9 @@ static inline void renderBundleReleaseCallback(WGPURenderBundle renderPipeline, 
 static inline void querySetReleaseCallback(WGPUQuerySet renderPipeline, void* unused){
     wgpuQuerySetRelease(renderPipeline);
 }
+static inline void accelerationStructureReleaseCallback(WGPURayTracingAccelerationContainer as, void* unused){
+    wgpuRayTracingAccelerationContainerRelease(as);
+}
 
 
 
@@ -11272,6 +11275,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
+    WGPURayTracingAccelerationContainerSet_for_each(&resourceUsage->referencedAccelerationStructures, accelerationStructureReleaseCallback, NULL);
 
     BufferUsageRecordMap_free(&resourceUsage->referencedBuffers);
     ImageUsageRecordMap_free(&resourceUsage->referencedTextures);
@@ -11283,6 +11287,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
+    WGPURayTracingAccelerationContainerSet_free(&resourceUsage->referencedAccelerationStructures);
 }
 
 
@@ -11667,6 +11672,8 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
     ENTRY();
 
     WGPUDevice device = encoder->device;
+
+    ru_trackAccelerationStructure(&encoder->resourceUsage, container);
 
     if(container->level == WGPURayTracingAccelerationContainerLevel_Top){
         if (container->instanceBuffer) {

@@ -6206,7 +6206,21 @@ TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
     WGPURayTracingAccelerationContainer blas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &blasDesc);
     ASSERT_NE(blas, nullptr);
 
-    uint32_t preRefCount = blas->refCount;
+    // An acceleration-structure binding must be top-level, so wrap the BLAS in a one-instance TLAS.
+    WGPUTransformMatrix identity = {{ {1,0,0,0}, {0,1,0,0}, {0,0,1,0} }};
+    WGPURayTracingAccelerationInstanceDescriptor inst = {};
+    inst.usage = WGPURayTracingAccelerationInstanceUsage_TriangleCullDisable;
+    inst.mask = 0xFF;
+    inst.transformMatrix = identity;
+    inst.geometryContainer = blas;
+    WGPURayTracingAccelerationContainerDescriptor tlasDesc = {};
+    tlasDesc.level = WGPURayTracingAccelerationContainerLevel_Top;
+    tlasDesc.instanceCount = 1;
+    tlasDesc.instances = &inst;
+    WGPURayTracingAccelerationContainer tlas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &tlasDesc);
+    ASSERT_NE(tlas, nullptr);
+
+    uint32_t preRefCount = tlas->refCount;
 
     WGPUBindGroupLayoutEntryRayTracing rtLayout = {};
     rtLayout.chain.sType = WGPUSType_BindGroupLayoutEntryRayTracing;
@@ -6223,7 +6237,7 @@ TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
 
     WGPUBindGroupEntryRayTracing rtEntry = {};
     rtEntry.chain.sType = WGPUSType_BindGroupEntryRayTracing;
-    rtEntry.accelerationStructure = blas;
+    rtEntry.accelerationStructure = tlas;
     WGPUBindGroupEntry bgEntry = {};
     bgEntry.nextInChain = &rtEntry.chain;
     bgEntry.binding = 0;
@@ -6235,14 +6249,15 @@ TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
     ASSERT_NE(bg, nullptr);
 
     // BindGroup tracks the acceleration structure -- refCount increased.
-    EXPECT_GT((uint32_t)blas->refCount, preRefCount)
+    EXPECT_GT((uint32_t)tlas->refCount, preRefCount)
         << "BindGroup should AddRef the acceleration structure via ResourceUsage tracking";
 
     // Releasing the BindGroup must drop that reference (releaseAllAndClear).
     wgpuBindGroupRelease(bg);
-    EXPECT_EQ((uint32_t)blas->refCount, preRefCount)
+    EXPECT_EQ((uint32_t)tlas->refCount, preRefCount)
         << "releaseAllAndClear must release referenced acceleration structures";
 
+    wgpuRayTracingAccelerationContainerRelease(tlas);
     wgpuRayTracingAccelerationContainerRelease(blas);
     wgpuBindGroupLayoutRelease(layout);
     wgpuBufferRelease(aabbBuffer);
