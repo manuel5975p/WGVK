@@ -6302,6 +6302,54 @@ TEST_F(WebGPUTest, AccelerationStructureBuildHoldsReference) {
     wgpuBufferRelease(aabbBuffer);
 }
 
+TEST_F(WebGPUTest, AccelerationStructureBuildReferenceReleasedAfterTick) {
+    float aabb[6] = { 0,0,0, 1,1,1 };
+    WGPUBufferDescriptor aabbDesc = {};
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.size = sizeof(aabb);
+    WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
+    ASSERT_NE(aabbBuffer, nullptr);
+    wgpuQueueWriteBuffer(queue, aabbBuffer, 0, aabb, sizeof(aabb));
+
+    WGPURayTracingAccelerationGeometryDescriptor geom = {};
+    geom.type = WGPURayTracingAccelerationGeometryType_AABBs;
+    geom.aabb.buffer = aabbBuffer;
+    geom.aabb.count = 1;
+    geom.aabb.stride = sizeof(float) * 6;
+
+    WGPURayTracingAccelerationContainerDescriptor blasDesc = {};
+    blasDesc.level = WGPURayTracingAccelerationContainerLevel_Bottom;
+    blasDesc.geometryCount = 1;
+    blasDesc.geometries = &geom;
+    WGPURayTracingAccelerationContainer blas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &blasDesc);
+    ASSERT_NE(blas, nullptr);
+
+    uint32_t preRefCount = blas->refCount;
+
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderBuildRayTracingAccelerationContainer(enc, blas);
+    WGPUCommandBuffer cbuf = wgpuCommandEncoderFinish(enc, nullptr);
+    wgpuQueueSubmit(queue, 1, &cbuf);
+    wgpuCommandEncoderRelease(enc);
+    wgpuCommandBufferRelease(cbuf);
+
+    ASSERT_GT((uint32_t)blas->refCount, preRefCount)
+        << "recording a build should hold a reference until the build completes";
+
+    wgpuQueueWaitIdle(queue);
+    for (int i = 0; i < framesInFlight + 2; i++) {
+        wgpuDeviceTick(device);
+    }
+
+    EXPECT_EQ((uint32_t)blas->refCount, preRefCount)
+        << "reclaiming the build command buffer must release the tracked acceleration structure; "
+           "ResourceUsage_move has to carry referencedAccelerationStructures from the finished "
+           "encoder onto the command buffer, otherwise the reference leaks every build";
+
+    wgpuRayTracingAccelerationContainerRelease(blas);
+    wgpuBufferRelease(aabbBuffer);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
