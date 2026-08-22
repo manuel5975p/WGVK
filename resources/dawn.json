@@ -758,6 +758,39 @@
                         "type": "string view"
                     }
                 ]
+            },
+            {
+                "name": "update entry",
+                "no autolock": true,
+                "args": [
+                    {
+                        "name": "binding",
+                        "type": "uint32_t"
+                    },
+                    {
+                        "name": "array index",
+                        "type": "uint32_t"
+                    },
+                    {
+                        "name": "entry",
+                        "type": "bind group entry",
+                        "annotation": "const*"
+                    }
+                ]
+            },
+            {
+                "name": "clear entry",
+                "no autolock": true,
+                "args": [
+                    {
+                        "name": "binding",
+                        "type": "uint32_t"
+                    },
+                    {
+                        "name": "array index",
+                        "type": "uint32_t"
+                    }
+                ]
             }
         ]
     },

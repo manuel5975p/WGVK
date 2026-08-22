@@ -2329,6 +2329,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,        // "VK_KHR_ray_tracing_pipeline"
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,    // "VK_KHR_deferred_host_operations" - required by acceleration structure
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,         // "VK_EXT_descriptor_indexing" - needed for bindless descriptors
+        VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,                // "VK_EXT_robustness2" - nullDescriptor, for clearing bindless slots
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,       // "VK_KHR_buffer_device_address" - needed by AS
         VK_KHR_SPIRV_1_4_EXTENSION_NAME,                   // "VK_KHR_spirv_1_4" - required for ray tracing shaders
         VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,       // "VK_KHR_shader_float_controls" - required by spirv_1_4
@@ -2377,6 +2378,26 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         .pNext = &pipelineFeatures,
     };
 
+    VkPhysicalDeviceRobustness2FeaturesEXT robustness2FeaturesForNullDescriptor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+        .pNext = &accelerationStructureFeatures,
+    };
+
+    VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        .pNext = &robustness2FeaturesForNullDescriptor,
+    };
+
+    VkPhysicalDeviceShaderFloat16Int8Features int8Features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+        .pNext = &indexingFeatures,
+    };
+
+    VkPhysicalDevice8BitStorageFeatures storage8BitFeatures = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES,
+        .pNext = &int8Features,
+    };
+
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrFeatures = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
         .samplerYcbcrConversion = requiresYCbCr ? VK_TRUE : VK_FALSE,
@@ -2384,7 +2405,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
 
     VkPhysicalDeviceVulkan13Features v13features = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = &accelerationStructureFeatures,
+        .pNext = &storage8BitFeatures,
     };
 
     VkPhysicalDeviceFeatures2 deviceFeatures = {
@@ -2442,6 +2463,20 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     }
     retDevice->capabilities.dynamicRendering = v13features.dynamicRendering;
     retDevice->capabilities.raytracing = pipelineFeatures.rayTracingPipeline && accelerationStructureFeatures.accelerationStructure;
+    retDevice->capabilities.bindlessDescriptors =
+        indexingFeatures.descriptorBindingPartiallyBound &&
+        indexingFeatures.runtimeDescriptorArray;
+    retDevice->capabilities.bindlessBuffers =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind &&
+        indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind;
+    retDevice->capabilities.bindlessSampledImages =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingSampledImageUpdateAfterBind;
+    retDevice->capabilities.bindlessStorageImages =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingStorageImageUpdateAfterBind;
+    retDevice->capabilities.nullDescriptor = robustness2FeaturesForNullDescriptor.nullDescriptor;
     retDevice->capabilities.shaderDeviceAddress = deviceFeaturesAddressKhr.bufferDeviceAddress;
     retDevice->uncapturedErrorCallbackInfo = descriptor->uncapturedErrorCallbackInfo;
 
@@ -3450,7 +3485,8 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
         for(uint32_t i = 0;i < bgdesc->layout->entryCount;i++){
             const VkDescriptorType vkdt = extractVkDescriptorType(bgdesc->layout->entries + i);
             const uint32_t contiguousIndex = descriptorTypeContiguous(vkdt);
-            ++counts[contiguousIndex];
+            const uint32_t descriptorCount = bgdesc->layout->entries[i].bindingArraySize > 1 ? bgdesc->layout->entries[i].bindingArraySize : 1;
+            counts[contiguousIndex] += descriptorCount;
         }
         VkDescriptorPoolSize sizes[DESCRIPTOR_TYPE_UPPER_LIMIT] = {0};
         uint32_t VkDescriptorPoolSizeCount = 0;
@@ -3466,6 +3502,9 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
         dpci.poolSizeCount = VkDescriptorPoolSizeCount;
         dpci.pPoolSizes = sizes;
         dpci.maxSets = 1;
+        if(bgdesc->layout->bindless){
+            dpci.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+        }
         device->functions.vkCreateDescriptorPool(device->device, &dpci, NULL, &ret->pool);
 
         const VkDescriptorSetAllocateInfo dsai = {
@@ -3496,6 +3535,128 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
     return ret;
 }
 
+
+void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex, const WGPUBindGroupEntry* entry){
+    ENTRY();
+    wgvk_assert(bindGroup->layout->bindless, "wgpuBindGroupUpdateEntry: bind group's layout was not created with WGPUBindGroupLayoutDescriptorBindless");
+
+    const WGPUBindGroupLayoutEntry* layoutEntry = NULL;
+    for(uint32_t i = 0;i < bindGroup->layout->entryCount;i++){
+        if(bindGroup->layout->entries[i].binding == binding){
+            layoutEntry = bindGroup->layout->entries + i;
+            break;
+        }
+    }
+    wgvk_assert(layoutEntry != NULL, "wgpuBindGroupUpdateEntry: binding not found in layout");
+
+    const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
+
+    VkWriteDescriptorSet write zeroinit;
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = bindGroup->set;
+    write.dstBinding = binding;
+    write.dstArrayElement = arrayIndex;
+    write.descriptorCount = 1;
+    write.descriptorType = entryType;
+
+    VkDescriptorBufferInfo bufferInfo zeroinit;
+    VkDescriptorImageInfo imageInfo zeroinit;
+
+    switch(entryType){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            WGPUBuffer bufferOfThatEntry = (WGPUBuffer)entry->buffer;
+            ru_trackBuffer(&bindGroup->resourceUsage, bufferOfThatEntry, (BufferUsageRecord){0, 0, VK_FALSE});
+            bufferInfo.buffer = bufferOfThatEntry->buffer;
+            bufferInfo.offset = entry->offset;
+            bufferInfo.range  = entry->size;
+            write.pBufferInfo = &bufferInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            ru_trackTextureView(&bindGroup->resourceUsage, (WGPUTextureView)entry->textureView);
+            imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            write.pImageInfo = &imageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            ru_trackTextureView(&bindGroup->resourceUsage, (WGPUTextureView)entry->textureView);
+            imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            write.pImageInfo = &imageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            ru_trackSampler(&bindGroup->resourceUsage, entry->sampler);
+            imageInfo.sampler = entry->sampler->sampler;
+            write.pImageInfo = &imageInfo;
+        }break;
+        default:
+            wgvk_assert(0, "wgpuBindGroupUpdateEntry: unsupported descriptor type for bindless update");
+            return;
+    }
+
+    bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    EXIT();
+}
+
+
+void wgpuBindGroupClearEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    ENTRY();
+    wgvk_assert(bindGroup->layout->bindless, "wgpuBindGroupClearEntry: bind group's layout was not created with WGPUBindGroupLayoutDescriptorBindless");
+    wgvk_assert(bindGroup->device->capabilities.nullDescriptor, "wgpuBindGroupClearEntry: device does not support nullDescriptor");
+
+    const WGPUBindGroupLayoutEntry* layoutEntry = NULL;
+    for(uint32_t i = 0;i < bindGroup->layout->entryCount;i++){
+        if(bindGroup->layout->entries[i].binding == binding){
+            layoutEntry = bindGroup->layout->entries + i;
+            break;
+        }
+    }
+    wgvk_assert(layoutEntry != NULL, "wgpuBindGroupClearEntry: binding not found in layout");
+
+    const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
+
+    VkWriteDescriptorSet write zeroinit;
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = bindGroup->set;
+    write.dstBinding = binding;
+    write.dstArrayElement = arrayIndex;
+    write.descriptorCount = 1;
+    write.descriptorType = entryType;
+
+    VkDescriptorBufferInfo nullBufferInfo zeroinit;
+    VkDescriptorImageInfo nullImageInfo zeroinit;
+
+    switch(entryType){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            nullBufferInfo.buffer = VK_NULL_HANDLE;
+            nullBufferInfo.offset = 0;
+            nullBufferInfo.range = VK_WHOLE_SIZE;
+            write.pBufferInfo = &nullBufferInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            nullImageInfo.imageView = VK_NULL_HANDLE;
+            nullImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            write.pImageInfo = &nullImageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            nullImageInfo.imageView = VK_NULL_HANDLE;
+            nullImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            write.pImageInfo = &nullImageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            nullImageInfo.sampler = VK_NULL_HANDLE;
+            write.pImageInfo = &nullImageInfo;
+        }break;
+        default:
+            wgvk_assert(0, "wgpuBindGroupClearEntry: unsupported descriptor type for a bindless array");
+            EXIT();
+            return;
+    }
+
+    bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    EXIT();
+}
 
 
 WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGPUBindGroupLayoutDescriptor* bgldesc){
@@ -3533,7 +3694,63 @@ WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGP
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     };
 
+    int isBindless = 0;
+    for(const WGPUChainedStruct* descriptorChain = bgldesc->nextInChain; descriptorChain != NULL; descriptorChain = descriptorChain->next){
+        if(descriptorChain->sType == WGPUSType_BindGroupLayoutDescriptorBindless){
+            isBindless = 1;
+            break;
+        }
+    }
+    ret->bindless = isBindless;
+
+    for(uint32_t i = 0;i < entryCount;i++){
+        if(entries[i].bindingArraySize > 1){
+            vkBindings.data[i].descriptorCount = entries[i].bindingArraySize;
+        }
+    }
+
+    VkDescriptorBindingFlags* bindingFlags = NULL;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo;
+    if(isBindless){
+        wgvk_assert(device->capabilities.bindlessDescriptors, "wgpuDeviceCreateBindGroupLayout: WGPUBindGroupLayoutDescriptorBindless requested but the device does not support bindless descriptors");
+
+        bindingFlags = (VkDescriptorBindingFlags*)RL_CALLOC(entryCount, sizeof(VkDescriptorBindingFlags));
+        for(uint32_t i = 0;i < entryCount;i++){
+            if(entries[i].bindingArraySize > 0){
+                const VkDescriptorType arrayEntryType = extractVkDescriptorType(entries + i);
+                switch(arrayEntryType){
+                    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                        wgvk_assert(device->capabilities.bindlessBuffers, "wgpuDeviceCreateBindGroupLayout: bindless buffer array requested but the device does not support update-after-bind buffer descriptors");
+                        break;
+                    case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+                    case VK_DESCRIPTOR_TYPE_SAMPLER:
+                        wgvk_assert(device->capabilities.bindlessSampledImages, "wgpuDeviceCreateBindGroupLayout: bindless sampled image/sampler array requested but the device does not support update-after-bind sampled image descriptors");
+                        break;
+                    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+                        wgvk_assert(device->capabilities.bindlessStorageImages, "wgpuDeviceCreateBindGroupLayout: bindless storage image array requested but the device does not support update-after-bind storage image descriptors");
+                        break;
+                    default:
+                        wgvk_assert(0, "wgpuDeviceCreateBindGroupLayout: unsupported descriptor type for a bindless array");
+                        break;
+                }
+                bindingFlags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+            }
+        }
+
+        bindingFlagsInfo = (VkDescriptorSetLayoutBindingFlagsCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .bindingCount = entryCount,
+            .pBindingFlags = bindingFlags,
+        };
+        slci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+        slci.pNext = &bindingFlagsInfo;
+    }
+
     VkResult createResult = device->functions.vkCreateDescriptorSetLayout(device->device, &slci, NULL, &ret->layout);
+    if(bindingFlags){
+        RL_FREE(bindingFlags);
+    }
     if(createResult != VK_SUCCESS){
         RL_FREE(ret);
         return NULL;
@@ -4328,7 +4545,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
             const RenderPassCommandSetBindGroup* cmdSetBindGroup = &cmd->setBindGroup;
             const WGPUBindGroup       group  = cmdSetBindGroup->group;
             const WGPUBindGroupLayout layout = group->layout;
-            for(uint32_t bindingIndex = 0;bindingIndex < layout->entryCount;bindingIndex++){
+            for(uint32_t bindingIndex = 0;bindingIndex < group->entryCount;bindingIndex++){
 
                 wgvk_assert(group->entries[bindingIndex].binding == layout->entries[bindingIndex].binding, "Mismatch between layout and group, this will cause bugs.");
 
@@ -7291,7 +7508,7 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
             const RenderPassCommandSetBindGroup* cmdSetBindGroup = &cmd->setBindGroup;
             const WGPUBindGroup       group  = cmdSetBindGroup->group;
             const WGPUBindGroupLayout layout = group->layout;
-            for(uint32_t bindingIndex = 0;bindingIndex < layout->entryCount;bindingIndex++){
+            for(uint32_t bindingIndex = 0;bindingIndex < group->entryCount;bindingIndex++){
 
                 wgvk_assert(group->entries[bindingIndex].binding == layout->entries[bindingIndex].binding, "Mismatch between layout and group, this will cause bugs.");
 
@@ -8211,6 +8428,9 @@ static inline void renderBundleReleaseCallback(WGPURenderBundle renderPipeline, 
 }
 static inline void querySetReleaseCallback(WGPUQuerySet renderPipeline, void* unused){
     wgpuQuerySetRelease(renderPipeline);
+}
+static inline void accelerationStructureReleaseCallback(WGPURayTracingAccelerationContainer as, void* unused){
+    wgpuRayTracingAccelerationContainerRelease(as);
 }
 
 
@@ -11055,6 +11275,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
+    WGPURayTracingAccelerationContainerSet_for_each(&resourceUsage->referencedAccelerationStructures, accelerationStructureReleaseCallback, NULL);
 
     BufferUsageRecordMap_free(&resourceUsage->referencedBuffers);
     ImageUsageRecordMap_free(&resourceUsage->referencedTextures);
@@ -11066,6 +11287,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
+    WGPURayTracingAccelerationContainerSet_free(&resourceUsage->referencedAccelerationStructures);
 }
 
 
@@ -11250,6 +11472,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
     WGPURayTracingAccelerationContainer ret = RL_CALLOC(1, sizeof(WGPURayTracingAccelerationContainerImpl));
     ret->level = descriptor->level;
     ret->device = device;
+    ret->refCount = 1;
 
     // For BLAS, geometryCount is the number of meshes.
     // For TLAS, geometryCount is 1 (A single geometry of type INSTANCES containing N primitives).
@@ -11450,6 +11673,8 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
 
     WGPUDevice device = encoder->device;
 
+    ru_trackAccelerationStructure(&encoder->resourceUsage, container);
+
     if(container->level == WGPURayTracingAccelerationContainerLevel_Top){
         if (container->instanceBuffer) {
             BufferUsageSnap instanceSnap = {
@@ -11521,6 +11746,44 @@ void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder en
 void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container){
     ENTRY();
 
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerAddRef(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    ++container->refCount;
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerRelease(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    if(--container->refCount == 0){
+        WGPUDevice device = container->device;
+
+        device->functions.vkDestroyAccelerationStructureKHR(device->device, container->accelerationStructure, NULL);
+
+        for(uint32_t i = 0; i < container->geometryCount; i++){
+            if(container->inputGeometryBuffers && container->inputGeometryBuffers[i]){
+                wgpuBufferRelease(container->inputGeometryBuffers[i]);
+            }
+        }
+        RL_FREE(container->inputGeometryBuffers);
+        RL_FREE(container->geometries);
+        RL_FREE(container->buildRangeInfos);
+        RL_FREE(container->primitiveCounts);
+
+        if(container->instanceBuffer){
+            wgpuBufferRelease(container->instanceBuffer);
+        }
+        if(container->updateScratchBuffer){
+            wgpuBufferRelease(container->updateScratchBuffer);
+        }
+        wgpuBufferRelease(container->accelerationStructureBuffer);
+        wgpuBufferRelease(container->buildScratchBuffer);
+
+        wgpuDeviceRelease(device);
+        RL_FREE(container);
+    }
     EXIT();
 }
 
