@@ -293,6 +293,7 @@ typedef enum WGPUSType {
     WGPUSType_ExtrasLimits = 0x10000006,
     WGPUSType_BindGroupLayoutEntryRayTracing = 0x10000007,
     WGPUSType_BindGroupEntryRayTracing = 0x10000008,
+    WGPUSType_BindGroupLayoutDescriptorBindless = 0x10000009,
 }WGPUSType WGPU_ENUM_ATTRIBUTE;
 
 typedef enum WGPUCallbackMode {
@@ -1256,6 +1257,10 @@ typedef struct WGPUBindGroupLayoutEntryRayTracing {
     WGPUBool accelerationStructure;
 } WGPUBindGroupLayoutEntryRayTracing;
 
+typedef struct WGPUBindGroupLayoutDescriptorBindless {
+    WGPUChainedStruct chain;
+} WGPUBindGroupLayoutDescriptorBindless;
+
 typedef struct WGPUSamplerDescriptor {
     WGPUChainedStruct * nextInChain;
     WGPUStringView label;
@@ -1996,6 +2001,8 @@ WGVK_EXPORT WGPUComputePipeline wgpuDeviceCreateComputePipeline  (WGPUDevice dev
 WGVK_EXPORT WGPUFuture          wgpuShaderModuleGetReflectionInfo(WGPUShaderModule shaderModule, WGPUReflectionInfoCallbackInfo callbackInfo);
 WGVK_EXPORT WGPUBindGroup wgpuDeviceCreateBindGroup              (WGPUDevice device, const WGPUBindGroupDescriptor* bgdesc);
 WGVK_EXPORT void wgpuWriteBindGroup                              (WGPUDevice device, WGPUBindGroup, const WGPUBindGroupDescriptor* bgdesc);
+WGVK_EXPORT void wgpuBindGroupUpdateEntry                        (WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex, const WGPUBindGroupEntry* entry);
+WGVK_EXPORT void wgpuBindGroupClearEntry                         (WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex);
 WGVK_EXPORT WGPUCommandEncoder wgpuDeviceCreateCommandEncoder    (WGPUDevice device, const WGPUCommandEncoderDescriptor* cdesc);
 WGVK_EXPORT WGPUCommandBuffer wgpuCommandEncoderFinish           (WGPUCommandEncoder commandEncoder, WGPU_NULLABLE WGPUCommandBufferDescriptor const * descriptor);
 WGVK_EXPORT void wgpuDeviceTick                                  (WGPUDevice device);
@@ -2036,6 +2043,8 @@ WGVK_EXPORT WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandE
 WGVK_EXPORT void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container);
 WGVK_EXPORT void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer source, WGPURayTracingAccelerationContainer dest);
 WGVK_EXPORT void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container);
+WGVK_EXPORT void wgpuRayTracingAccelerationContainerAddRef(WGPURayTracingAccelerationContainer container) WGPU_FUNCTION_ATTRIBUTE;
+WGVK_EXPORT void wgpuRayTracingAccelerationContainerRelease(WGPURayTracingAccelerationContainer container) WGPU_FUNCTION_ATTRIBUTE;
 
 WGVK_EXPORT WGPURenderBundleEncoder wgpuDeviceCreateRenderBundleEncoder(WGPUDevice device, WGPURenderBundleEncoderDescriptor const * descriptor);
 WGVK_EXPORT WGPURenderBundle wgpuRenderBundleEncoderFinish(WGPURenderBundleEncoder renderBundleEncoder, WGPU_NULLABLE WGPURenderBundleDescriptor const * descriptor);
