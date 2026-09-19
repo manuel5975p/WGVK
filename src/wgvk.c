@@ -2808,12 +2808,11 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
     };
 
     VkMemoryPropertyFlags propertyToFind = 0;
-    if(desc->usage & (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite)){
+    if((desc->usage & (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite)) || desc->mappedAtCreation){
         propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     }
     else{
-        // propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     }
 
     #if USE_VMA_ALLOCATOR == 1
