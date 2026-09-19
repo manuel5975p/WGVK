@@ -2807,17 +2807,24 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         .usage = toVulkanBufferUsage(desc->usage),
     };
 
-    VkMemoryPropertyFlags propertyToFind = 0;
+    // Host-visibility has to be required: VMA treats every memory type as a candidate
+    // when requiredFlags is 0, so a mappable buffer could come back from a
+    // DEVICE_LOCAL-only type and fail vkMapMemory. Device-locality stays preferred,
+    // since falling back to host-visible memory beats failing the allocation.
+    VkMemoryPropertyFlags requiredProperties = 0;
+    VkMemoryPropertyFlags preferredProperties = 0;
     if((desc->usage & (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite)) || desc->mappedAtCreation){
-        propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        requiredProperties = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     }
     else{
-        propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        preferredProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     }
+    const VkMemoryPropertyFlags propertyToFind = requiredProperties | preferredProperties;
 
     #if USE_VMA_ALLOCATOR == 1
         VmaAllocationCreateInfo vallocInfo = {
-            .preferredFlags = propertyToFind,
+            .requiredFlags = requiredProperties,
+            .preferredFlags = preferredProperties,
         };
         VmaAllocation allocation zeroinit;
         VmaAllocationInfo allocationInfo zeroinit;
@@ -2830,6 +2837,7 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         }
         wgpuBuffer->vmaAllocation = allocation;
         wgpuBuffer->allocationType = AllocationTypeVMA;
+        vmaGetAllocationMemoryProperties(device->allocator, allocation, &wgpuBuffer->memoryProperties);
     #else
         device->functions.vkCreateBuffer(device->device, &bufferDesc, NULL, &wgpuBuffer->buffer);
         wgvkAllocation allocation = {0};
@@ -2848,9 +2856,11 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         }
         wgpuBuffer->allocationType = AllocationTypeBuiltin;
         wgpuBuffer->builtinAllocation = allocation;
+        const uint32_t memoryTypeIndex = allocation.pool->memoryTypeIndex;
+        const VkMemoryType* memoryTypes = device->builtinAllocator.memoryProperties.memoryTypes;
+        wgpuBuffer->memoryProperties = memoryTypes[memoryTypeIndex].propertyFlags;
     device->functions.vkBindBufferMemory(device->device, wgpuBuffer->buffer, allocation.pool->chunks[allocation.chunk_index].memory, allocation.offset);
     #endif
-    wgpuBuffer->memoryProperties = propertyToFind;
 
     if(desc->usage & WGPUBufferUsage_ShaderDeviceAddress){
         const VkBufferDeviceAddressInfo bdai = {
