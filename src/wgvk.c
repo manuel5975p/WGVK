@@ -3536,6 +3536,106 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
 }
 
 
+static const WGPUBindGroupLayoutEntry* findBindGroupLayoutEntry(WGPUBindGroupLayout layout, uint32_t binding){
+    for(uint32_t i = 0;i < layout->entryCount;i++){
+        if(layout->entries[i].binding == binding){
+            return layout->entries + i;
+        }
+    }
+    return NULL;
+}
+
+static void bindlessEntryAddRef(const WGPUBindGroupEntry* entry){
+    if(entry->buffer) wgpuBufferAddRef(entry->buffer);
+    if(entry->textureView) wgpuTextureViewAddRef(entry->textureView);
+    if(entry->sampler) wgpuSamplerAddRef(entry->sampler);
+}
+
+static void bindlessEntryRelease(const WGPUBindGroupEntry* entry){
+    if(entry->buffer) wgpuBufferRelease(entry->buffer);
+    if(entry->textureView) wgpuTextureViewRelease(entry->textureView);
+    if(entry->sampler) wgpuSamplerRelease(entry->sampler);
+}
+
+static BindlessSlot* findBindlessSlot(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    for(size_t i = 0;i < bindGroup->bindlessSlots.size;i++){
+        BindlessSlot* slot = bindGroup->bindlessSlots.data + i;
+        if(slot->entry.binding == binding && slot->arrayIndex == arrayIndex){
+            return slot;
+        }
+    }
+    return NULL;
+}
+
+static void storeBindlessSlot(WGPUBindGroup bindGroup, uint32_t arrayIndex, WGPUBindGroupEntry entry){
+    bindlessEntryAddRef(&entry);
+    BindlessSlot* existing = findBindlessSlot(bindGroup, entry.binding, arrayIndex);
+    if(existing){
+        bindlessEntryRelease(&existing->entry);
+        existing->entry = entry;
+        return;
+    }
+    BindlessSlotVector_push_back(&bindGroup->bindlessSlots, (BindlessSlot){ .arrayIndex = arrayIndex, .entry = entry });
+}
+
+static void removeBindlessSlot(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    BindlessSlot* existing = findBindlessSlot(bindGroup, binding, arrayIndex);
+    if(existing == NULL){
+        return;
+    }
+    bindlessEntryRelease(&existing->entry);
+    *existing = bindGroup->bindlessSlots.data[bindGroup->bindlessSlots.size - 1];
+    BindlessSlotVector_pop_back(&bindGroup->bindlessSlots);
+}
+
+static void releaseBindlessSlots(WGPUBindGroup bindGroup){
+    for(size_t i = 0;i < bindGroup->bindlessSlots.size;i++){
+        bindlessEntryRelease(&bindGroup->bindlessSlots.data[i].entry);
+    }
+    BindlessSlotVector_free(&bindGroup->bindlessSlots);
+}
+
+static void ce_trackBindlessSlot(WGPUCommandEncoder encoder, WGPUBindGroupLayout layout, const WGPUBindGroupEntry* entry){
+    const WGPUBindGroupLayoutEntry* layoutEntry = findBindGroupLayoutEntry(layout, entry->binding);
+    const VkPipelineStageFlags stage = toVulkanPipelineStageBits(layoutEntry->visibility);
+
+    switch(extractVkDescriptorType(layoutEntry)){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            ce_trackBuffer(encoder, entry->buffer, (BufferUsageSnap){
+                .stage = stage,
+                .access = extractVkAccessFlags(layoutEntry)
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            ce_trackTextureView(encoder, entry->textureView, (ImageUsageSnap){
+                .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .access = VK_ACCESS_SHADER_READ_BIT,
+                .stage = stage,
+                .subresource = entry->textureView->subresourceRange
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            ce_trackTextureView(encoder, entry->textureView, (ImageUsageSnap){
+                .layout = VK_IMAGE_LAYOUT_GENERAL,
+                .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                .stage = stage,
+                .subresource = entry->textureView->subresourceRange
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            ru_trackSampler(&encoder->resourceUsage, entry->sampler);
+        }break;
+        default: break;
+    }
+}
+
+static void ce_trackBindlessSlots(WGPUCommandEncoder encoder, WGPUBindGroup group){
+    for(size_t i = 0;i < group->bindlessSlots.size;i++){
+        ce_trackBindlessSlot(encoder, group->layout, &group->bindlessSlots.data[i].entry);
+    }
+}
+
 void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex, const WGPUBindGroupEntry* entry){
     ENTRY();
     wgvk_assert(bindGroup->layout->bindless, "wgpuBindGroupUpdateEntry: bind group's layout was not created with WGPUBindGroupLayoutDescriptorBindless");
@@ -3561,31 +3661,35 @@ void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_
 
     VkDescriptorBufferInfo bufferInfo zeroinit;
     VkDescriptorImageInfo imageInfo zeroinit;
+    WGPUBindGroupEntry stored zeroinit;
+    stored.binding = binding;
 
     switch(entryType){
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
             WGPUBuffer bufferOfThatEntry = (WGPUBuffer)entry->buffer;
-            ru_trackBuffer(&bindGroup->resourceUsage, bufferOfThatEntry, (BufferUsageRecord){0, 0, VK_FALSE});
+            stored.buffer = bufferOfThatEntry;
+            stored.offset = entry->offset;
+            stored.size   = entry->size;
             bufferInfo.buffer = bufferOfThatEntry->buffer;
             bufferInfo.offset = entry->offset;
             bufferInfo.range  = entry->size;
             write.pBufferInfo = &bufferInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
-            ru_trackTextureView(&bindGroup->resourceUsage, (WGPUTextureView)entry->textureView);
+            stored.textureView = (WGPUTextureView)entry->textureView;
             imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             write.pImageInfo = &imageInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
-            ru_trackTextureView(&bindGroup->resourceUsage, (WGPUTextureView)entry->textureView);
+            stored.textureView = (WGPUTextureView)entry->textureView;
             imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             write.pImageInfo = &imageInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_SAMPLER:{
-            ru_trackSampler(&bindGroup->resourceUsage, entry->sampler);
+            stored.sampler = entry->sampler;
             imageInfo.sampler = entry->sampler->sampler;
             write.pImageInfo = &imageInfo;
         }break;
@@ -3595,6 +3699,7 @@ void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_
     }
 
     bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    storeBindlessSlot(bindGroup, arrayIndex, stored);
     EXIT();
 }
 
@@ -3655,6 +3760,7 @@ void wgpuBindGroupClearEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t
     }
 
     bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    removeBindlessSlot(bindGroup, binding, arrayIndex);
     EXIT();
 }
 
@@ -4601,6 +4707,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
                     );
                 }
             }
+            ce_trackBindlessSlots(renderPassEncoder->cmdEncoder, group);
         }
     }
     #if VULKAN_USE_DYNAMIC_RENDERING == 0
@@ -5132,6 +5239,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                             });
                         }
                     }
+                    ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
             }
             device->functions.vkCmdDispatch(
@@ -5160,6 +5268,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                             });
                         }
                     }
+                    ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
             }
 
@@ -6450,6 +6559,7 @@ void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
     ENTRY();
     if (--dshandle->refCount == 0) {
         releaseAllAndClear(&dshandle->resourceUsage);
+        releaseBindlessSlots(dshandle);
 
         WGPUBindGroupLayout stillThere = wgpuBindGroupLayoutRelease_withReturn(dshandle->layout);
         if(stillThere){
@@ -7563,6 +7673,7 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
                     );
                 }
             }
+            ce_trackBindlessSlots(rtPassEncoder->cmdEncoder, group);
         }
     }
     recordVkCommands(rtPassEncoder->cmdEncoder, rtPassEncoder->device, &rtPassEncoder->bufferedCommands, NULL);

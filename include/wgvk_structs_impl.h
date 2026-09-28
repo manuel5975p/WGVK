@@ -1698,6 +1698,13 @@ typedef struct DescriptorSetAndPool{
 DEFINE_VECTOR(static inline, VkAttachmentDescription, VkAttachmentDescriptionVector)
 DEFINE_VECTOR(static inline, WGPUBuffer, WGPUBufferVector)
 DEFINE_VECTOR(static inline, DescriptorSetAndPool, DescriptorSetAndPoolVector)
+
+typedef struct BindlessSlot{
+    uint32_t arrayIndex;
+    WGPUBindGroupEntry entry;
+}BindlessSlot;
+
+DEFINE_VECTOR(static inline, BindlessSlot, BindlessSlotVector)
 DEFINE_PTR_HASH_MAP_ERASABLE(static inline, BindGroupCacheMap, DescriptorSetAndPoolVector)
 
 
@@ -2037,6 +2044,7 @@ typedef struct WGPUBindGroupImpl{
     uint32_t cacheIndex;
     WGPUBindGroupEntry* entries;
     uint32_t entryCount;
+    BindlessSlotVector bindlessSlots;
 }WGPUBindGroupImpl;
 
 typedef struct WGPUBindGroupLayoutImpl{
