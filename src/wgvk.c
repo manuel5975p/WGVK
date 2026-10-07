@@ -2340,6 +2340,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
 
     int depthClipControl_Found = 0;
     int depthClipEnable_Found = 0;
+    int robustness2_Enabled = 0;
 
     const char* deviceExtensionsFound[deviceExtensionsToLookForCount + 4];
     uint32_t extInsertIndex = 0;
@@ -2363,7 +2364,9 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         if(deviceExtensionFound == 0){
             printf("Device extension not found: %s\n", deviceExtensionsToLookFor[i]);
         }
-
+        else if(strcmp(deviceExtensionsToLookFor[i], VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) == 0){
+            robustness2_Enabled = 1;
+        }
     }
 
     VkPhysicalDeviceBufferDeviceAddressFeaturesKHR deviceFeaturesAddressKhr = {
@@ -2416,6 +2419,13 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     deviceFeatures.pNext = &ycbcrFeatures;
 
     vkGetPhysicalDeviceFeatures2(adapter->physicalDevice, &deviceFeatures);
+    // Only nullDescriptor is wanted from robustness2; robust*Access2 cost performance in every shader.
+    robustness2FeaturesForNullDescriptor.robustBufferAccess2 = VK_FALSE;
+    robustness2FeaturesForNullDescriptor.robustImageAccess2 = VK_FALSE;
+    if(!robustness2_Enabled){
+        robustness2FeaturesForNullDescriptor.nullDescriptor = VK_FALSE;
+        indexingFeatures.pNext = robustness2FeaturesForNullDescriptor.pNext;
+    }
     if(pipelineFeatures.rayTracingPipeline == VK_TRUE){
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
         VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties = {
@@ -3648,6 +3658,7 @@ void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_
         }
     }
     wgvk_assert(layoutEntry != NULL, "wgpuBindGroupUpdateEntry: binding not found in layout");
+    wgvk_assert(layoutEntry->bindingArraySize > 0 && arrayIndex < layoutEntry->bindingArraySize, "wgpuBindGroupUpdateEntry: binding is not an array or arrayIndex out of range");
 
     const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
 
@@ -3668,6 +3679,7 @@ void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
             WGPUBuffer bufferOfThatEntry = (WGPUBuffer)entry->buffer;
+            wgvk_assert(bufferOfThatEntry != NULL, "wgpuBindGroupUpdateEntry: entry->buffer is null");
             stored.buffer = bufferOfThatEntry;
             stored.offset = entry->offset;
             stored.size   = entry->size;
@@ -3677,18 +3689,21 @@ void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_
             write.pBufferInfo = &bufferInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            wgvk_assert(entry->textureView != NULL, "wgpuBindGroupUpdateEntry: entry->textureView is null");
             stored.textureView = (WGPUTextureView)entry->textureView;
             imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             write.pImageInfo = &imageInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            wgvk_assert(entry->textureView != NULL, "wgpuBindGroupUpdateEntry: entry->textureView is null");
             stored.textureView = (WGPUTextureView)entry->textureView;
             imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             write.pImageInfo = &imageInfo;
         }break;
         case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            wgvk_assert(entry->sampler != NULL, "wgpuBindGroupUpdateEntry: entry->sampler is null");
             stored.sampler = entry->sampler;
             imageInfo.sampler = entry->sampler->sampler;
             write.pImageInfo = &imageInfo;
@@ -3717,6 +3732,7 @@ void wgpuBindGroupClearEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t
         }
     }
     wgvk_assert(layoutEntry != NULL, "wgpuBindGroupClearEntry: binding not found in layout");
+    wgvk_assert(layoutEntry->bindingArraySize > 0 && arrayIndex < layoutEntry->bindingArraySize, "wgpuBindGroupClearEntry: binding is not an array or arrayIndex out of range");
 
     const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
 
@@ -3749,10 +3765,7 @@ void wgpuBindGroupClearEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t
             nullImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             write.pImageInfo = &nullImageInfo;
         }break;
-        case VK_DESCRIPTOR_TYPE_SAMPLER:{
-            nullImageInfo.sampler = VK_NULL_HANDLE;
-            write.pImageInfo = &nullImageInfo;
-        }break;
+        // nullDescriptor does not cover samplers; VK_DESCRIPTOR_TYPE_SAMPLER falls through to the assert.
         default:
             wgvk_assert(0, "wgpuBindGroupClearEntry: unsupported descriptor type for a bindless array");
             EXIT();
