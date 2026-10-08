@@ -1764,6 +1764,283 @@ TEST_F(WebGPUTest, BindGroupReferenceCounting) {
     wgpuBufferRelease(buffer);
 }
 
+static WGPUTexture createTexture4x4(WGPUDevice device, WGPUTextureUsage usage) {
+    WGPUTextureDescriptor desc = {};
+    desc.size = {4, 4, 1};
+    desc.format = WGPUTextureFormat_RGBA8Unorm;
+    desc.usage = usage;
+    desc.mipLevelCount = 1;
+    desc.sampleCount = 1;
+    desc.dimension = WGPUTextureDimension_2D;
+    return wgpuDeviceCreateTexture(device, &desc);
+}
+
+static WGPUBindGroupLayout createBindlessTextureArrayLayout(WGPUDevice device, uint32_t arraySize) {
+    WGPUBindGroupLayoutDescriptorBindless bindlessMarker = {};
+    bindlessMarker.chain.sType = WGPUSType_BindGroupLayoutDescriptorBindless;
+
+    WGPUBindGroupLayoutEntry entries[2] = {};
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Fragment;
+    entries[0].sampler.type = WGPUSamplerBindingType_NonFiltering;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Fragment;
+    entries[1].texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+    entries[1].bindingArraySize = arraySize;
+
+    WGPUBindGroupLayoutDescriptor desc = {};
+    desc.nextInChain = &bindlessMarker.chain;
+    desc.entryCount = 2;
+    desc.entries = entries;
+    return wgpuDeviceCreateBindGroupLayout(device, &desc);
+}
+
+static WGPUSampler createNearestSampler(WGPUDevice device) {
+    WGPUSamplerDescriptor desc = {};
+    desc.addressModeU = WGPUAddressMode_ClampToEdge;
+    desc.addressModeV = WGPUAddressMode_ClampToEdge;
+    desc.addressModeW = WGPUAddressMode_ClampToEdge;
+    desc.magFilter = WGPUFilterMode_Nearest;
+    desc.minFilter = WGPUFilterMode_Nearest;
+    desc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    desc.maxAnisotropy = 1;
+    return wgpuDeviceCreateSampler(device, &desc);
+}
+
+static WGPUBindGroup createBindGroupWithSampler(WGPUDevice device, WGPUBindGroupLayout layout, WGPUSampler sampler) {
+    WGPUBindGroupEntry entry = {};
+    entry.binding = 0;
+    entry.sampler = sampler;
+
+    WGPUBindGroupDescriptor desc = {};
+    desc.layout = layout;
+    desc.entryCount = 1;
+    desc.entries = &entry;
+    return wgpuDeviceCreateBindGroup(device, &desc);
+}
+
+static void updateTextureSlot(WGPUBindGroup bindGroup, uint32_t slot, WGPUTextureView view) {
+    WGPUBindGroupEntry entry = {};
+    entry.binding = 1;
+    entry.textureView = view;
+    wgpuBindGroupUpdateEntry(bindGroup, 1, slot, &entry);
+}
+
+TEST_F(WebGPUTest, BindlessSlotsReleaseReplacedAndClearedViews) {
+    if (!device->capabilities.bindlessSampledImages || !device->capabilities.nullDescriptor) {
+        GTEST_SKIP() << "bindless sampled images or null descriptors unsupported";
+    }
+
+    WGPUBindGroupLayout layout = createBindlessTextureArrayLayout(device, 4);
+    WGPUSampler sampler = createNearestSampler(device);
+    WGPUBindGroup bindGroup = createBindGroupWithSampler(device, layout, sampler);
+    ASSERT_NE(bindGroup, nullptr);
+
+    WGPUTexture textureA = createTexture4x4(device, WGPUTextureUsage_TextureBinding);
+    WGPUTexture textureB = createTexture4x4(device, WGPUTextureUsage_TextureBinding);
+    WGPUTextureView viewA = wgpuTextureCreateView(textureA, nullptr);
+    WGPUTextureView viewB = wgpuTextureCreateView(textureB, nullptr);
+
+    updateTextureSlot(bindGroup, 0, viewA);
+    EXPECT_EQ(viewA->refCount, 2);
+
+    updateTextureSlot(bindGroup, 0, viewB);
+    EXPECT_EQ(viewA->refCount, 1);
+    EXPECT_EQ(viewB->refCount, 2);
+
+    updateTextureSlot(bindGroup, 1, viewA);
+    updateTextureSlot(bindGroup, 1, viewA);
+    EXPECT_EQ(viewA->refCount, 2);
+
+    wgpuBindGroupClearEntry(bindGroup, 1, 0);
+    EXPECT_EQ(viewB->refCount, 1);
+
+    wgpuBindGroupClearEntry(bindGroup, 1, 3);
+    EXPECT_EQ(viewA->refCount, 2);
+
+    wgpuBindGroupRelease(bindGroup);
+    EXPECT_EQ(viewA->refCount, 1);
+    EXPECT_EQ(viewB->refCount, 1);
+
+    wgpuTextureViewRelease(viewA);
+    wgpuTextureViewRelease(viewB);
+    wgpuTextureRelease(textureA);
+    wgpuTextureRelease(textureB);
+    wgpuSamplerRelease(sampler);
+    wgpuBindGroupLayoutRelease(layout);
+}
+
+TEST_F(WebGPUTest, BindlessSlotsTransitionSampledTexturesInRenderPass) {
+    if (!device->capabilities.bindlessSampledImages) {
+        GTEST_SKIP() << "bindless sampled images unsupported";
+    }
+
+    const uint32_t size = 4;
+    const uint32_t bytesPerRow = 256;
+    const size_t readSize = bytesPerRow * size;
+
+    const char* vsCode = R"(
+        #version 450
+        void main() {
+            const vec2 positions[3] = vec2[3](vec2(-1.0, -1.0), vec2(3.0, -1.0), vec2(-1.0, 3.0));
+            gl_Position = vec4(positions[gl_VertexIndex], 0.5, 1.0);
+        }
+    )";
+
+    const char* fsCode = R"(
+        #version 450
+        #extension GL_EXT_nonuniform_qualifier : require
+        layout(set = 0, binding = 0) uniform sampler textureSampler;
+        layout(set = 0, binding = 1) uniform texture2D textures[];
+        layout(location = 0) out vec4 outColor;
+        void main() {
+            vec2 uv = vec2(0.5);
+            vec4 uploaded = texture(sampler2D(textures[nonuniformEXT(0)], textureSampler), uv);
+            vec4 rendered = texture(sampler2D(textures[nonuniformEXT(1)], textureSampler), uv);
+            outColor = uploaded + rendered;
+        }
+    )";
+
+    WGPUShaderModule vsModule = compileGLSL(device, WGPUShaderStage_Vertex, vsCode);
+    WGPUShaderModule fsModule = compileGLSL(device, WGPUShaderStage_Fragment, fsCode);
+    ASSERT_NE(vsModule, nullptr);
+    ASSERT_NE(fsModule, nullptr);
+
+    WGPUBindGroupLayout layout = createBindlessTextureArrayLayout(device, 2);
+    WGPUPipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts = &layout;
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
+
+    WGPUColorTargetState colorTarget = {};
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragmentState = {};
+    fragmentState.module = fsModule;
+    fragmentState.entryPoint = { "main", 4 };
+    fragmentState.targetCount = 1;
+    fragmentState.targets = &colorTarget;
+
+    WGPURenderPipelineDescriptor pipeDesc = {};
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.vertex.module = vsModule;
+    pipeDesc.vertex.entryPoint = { "main", 4 };
+    pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeDesc.primitive.cullMode = WGPUCullMode_None;
+    pipeDesc.primitive.frontFace = WGPUFrontFace_CCW;
+    pipeDesc.multisample.count = 1;
+    pipeDesc.multisample.mask = 0xFFFFFFFF;
+    pipeDesc.fragment = &fragmentState;
+    WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &pipeDesc);
+    ASSERT_NE(pipeline, nullptr);
+
+    WGPUTexture uploaded = createTexture4x4(device, WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
+    WGPUTexture rendered = createTexture4x4(device, WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment);
+    WGPUTexture target = createTexture4x4(device, WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc);
+    WGPUTextureView uploadedView = wgpuTextureCreateView(uploaded, nullptr);
+    WGPUTextureView renderedView = wgpuTextureCreateView(rendered, nullptr);
+    WGPUTextureView targetView = wgpuTextureCreateView(target, nullptr);
+
+    std::vector<uint8_t> red(size * size * 4);
+    for (size_t i = 0; i < red.size(); i += 4) {
+        red[i + 0] = 255;
+        red[i + 3] = 255;
+    }
+    WGPUTexelCopyTextureInfo uploadDst = {};
+    uploadDst.texture = uploaded;
+    uploadDst.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferLayout uploadLayout = {};
+    uploadLayout.bytesPerRow = size * 4;
+    uploadLayout.rowsPerImage = size;
+    WGPUExtent3D extent = {size, size, 1};
+    wgpuQueueWriteTexture(queue, &uploadDst, red.data(), red.size(), &uploadLayout, &extent);
+
+    WGPUSampler sampler = createNearestSampler(device);
+    WGPUBindGroup bindGroup = createBindGroupWithSampler(device, layout, sampler);
+    updateTextureSlot(bindGroup, 0, uploadedView);
+    updateTextureSlot(bindGroup, 1, renderedView);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = readSize;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+
+    WGPURenderPassColorAttachment greenClear = {};
+    greenClear.view = renderedView;
+    greenClear.loadOp = WGPULoadOp_Clear;
+    greenClear.storeOp = WGPUStoreOp_Store;
+    greenClear.clearValue = {0.0, 1.0, 0.0, 1.0};
+    WGPURenderPassDescriptor clearDesc = {};
+    clearDesc.colorAttachmentCount = 1;
+    clearDesc.colorAttachments = &greenClear;
+    WGPURenderPassEncoder clearPass = wgpuCommandEncoderBeginRenderPass(encoder, &clearDesc);
+    wgpuRenderPassEncoderEnd(clearPass);
+    wgpuRenderPassEncoderRelease(clearPass);
+
+    WGPURenderPassColorAttachment targetAttachment = {};
+    targetAttachment.view = targetView;
+    targetAttachment.loadOp = WGPULoadOp_Clear;
+    targetAttachment.storeOp = WGPUStoreOp_Store;
+    targetAttachment.clearValue = {0.0, 0.0, 1.0, 1.0};
+    WGPURenderPassDescriptor sampleDesc = {};
+    sampleDesc.colorAttachmentCount = 1;
+    sampleDesc.colorAttachments = &targetAttachment;
+    WGPURenderPassEncoder samplePass = wgpuCommandEncoderBeginRenderPass(encoder, &sampleDesc);
+    wgpuRenderPassEncoderSetPipeline(samplePass, pipeline);
+    wgpuRenderPassEncoderSetBindGroup(samplePass, 0, bindGroup, 0, nullptr);
+    wgpuRenderPassEncoderDraw(samplePass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(samplePass);
+    wgpuRenderPassEncoderRelease(samplePass);
+
+    WGPUTexelCopyTextureInfo copySrc = {};
+    copySrc.texture = target;
+    copySrc.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferInfo copyDst = {};
+    copyDst.buffer = readBuffer;
+    copyDst.layout.bytesPerRow = bytesPerRow;
+    copyDst.layout.rowsPerImage = size;
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &copySrc, &copyDst, &extent);
+
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuQueueSubmit(queue, 1, &commandBuffer);
+    wgpuCommandBufferRelease(commandBuffer);
+
+    const uint8_t* pixels = (const uint8_t*)mapBufferSync(instance, readBuffer, WGPUMapMode_Read, 0, readSize);
+    ASSERT_NE(pixels, nullptr);
+    EXPECT_EQ(pixels[0], 255);
+    EXPECT_EQ(pixels[1], 255);
+    EXPECT_EQ(pixels[2], 0);
+    EXPECT_EQ(pixels[3], 255);
+    wgpuBufferUnmap(readBuffer);
+
+    EXPECT_EQ(uploaded->layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    EXPECT_EQ(rendered->layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        wgpuDeviceTick(device);
+    }
+
+    wgpuBindGroupRelease(bindGroup);
+    wgpuSamplerRelease(sampler);
+    wgpuBufferRelease(readBuffer);
+    wgpuTextureViewRelease(uploadedView);
+    wgpuTextureViewRelease(renderedView);
+    wgpuTextureViewRelease(targetView);
+    wgpuTextureRelease(uploaded);
+    wgpuTextureRelease(rendered);
+    wgpuTextureRelease(target);
+    wgpuRenderPipelineRelease(pipeline);
+    wgpuPipelineLayoutRelease(pipelineLayout);
+    wgpuBindGroupLayoutRelease(layout);
+    wgpuShaderModuleRelease(vsModule);
+    wgpuShaderModuleRelease(fsModule);
+}
+
 TEST_F(WebGPUTest, CommandEncoderReferenceCounting) {
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(device, nullptr);
     ASSERT_NE(enc, nullptr);

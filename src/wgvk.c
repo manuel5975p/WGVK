@@ -2329,6 +2329,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,        // "VK_KHR_ray_tracing_pipeline"
         VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,    // "VK_KHR_deferred_host_operations" - required by acceleration structure
         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,         // "VK_EXT_descriptor_indexing" - needed for bindless descriptors
+        VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,                // "VK_EXT_robustness2" - nullDescriptor, for clearing bindless slots
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,       // "VK_KHR_buffer_device_address" - needed by AS
         VK_KHR_SPIRV_1_4_EXTENSION_NAME,                   // "VK_KHR_spirv_1_4" - required for ray tracing shaders
         VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,       // "VK_KHR_shader_float_controls" - required by spirv_1_4
@@ -2339,6 +2340,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
 
     int depthClipControl_Found = 0;
     int depthClipEnable_Found = 0;
+    int robustness2_Enabled = 0;
 
     const char* deviceExtensionsFound[deviceExtensionsToLookForCount + 4];
     uint32_t extInsertIndex = 0;
@@ -2362,7 +2364,9 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         if(deviceExtensionFound == 0){
             printf("Device extension not found: %s\n", deviceExtensionsToLookFor[i]);
         }
-
+        else if(strcmp(deviceExtensionsToLookFor[i], VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) == 0){
+            robustness2_Enabled = 1;
+        }
     }
 
     VkPhysicalDeviceBufferDeviceAddressFeaturesKHR deviceFeaturesAddressKhr = {
@@ -2377,6 +2381,26 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
         .pNext = &pipelineFeatures,
     };
 
+    VkPhysicalDeviceRobustness2FeaturesEXT robustness2FeaturesForNullDescriptor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+        .pNext = &accelerationStructureFeatures,
+    };
+
+    VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        .pNext = &robustness2FeaturesForNullDescriptor,
+    };
+
+    VkPhysicalDeviceShaderFloat16Int8Features int8Features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+        .pNext = &indexingFeatures,
+    };
+
+    VkPhysicalDevice8BitStorageFeatures storage8BitFeatures = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES,
+        .pNext = &int8Features,
+    };
+
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrFeatures = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
         .samplerYcbcrConversion = requiresYCbCr ? VK_TRUE : VK_FALSE,
@@ -2384,7 +2408,7 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
 
     VkPhysicalDeviceVulkan13Features v13features = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = &accelerationStructureFeatures,
+        .pNext = &storage8BitFeatures,
     };
 
     VkPhysicalDeviceFeatures2 deviceFeatures = {
@@ -2395,6 +2419,13 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     deviceFeatures.pNext = &ycbcrFeatures;
 
     vkGetPhysicalDeviceFeatures2(adapter->physicalDevice, &deviceFeatures);
+    // Only nullDescriptor is wanted from robustness2; robust*Access2 cost performance in every shader.
+    robustness2FeaturesForNullDescriptor.robustBufferAccess2 = VK_FALSE;
+    robustness2FeaturesForNullDescriptor.robustImageAccess2 = VK_FALSE;
+    if(!robustness2_Enabled){
+        robustness2FeaturesForNullDescriptor.nullDescriptor = VK_FALSE;
+        indexingFeatures.pNext = robustness2FeaturesForNullDescriptor.pNext;
+    }
     if(pipelineFeatures.rayTracingPipeline == VK_TRUE){
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR rayTracingPipelineProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
         VkPhysicalDeviceAccelerationStructurePropertiesKHR accelerationStructureProperties = {
@@ -2442,6 +2473,20 @@ WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescript
     }
     retDevice->capabilities.dynamicRendering = v13features.dynamicRendering;
     retDevice->capabilities.raytracing = pipelineFeatures.rayTracingPipeline && accelerationStructureFeatures.accelerationStructure;
+    retDevice->capabilities.bindlessDescriptors =
+        indexingFeatures.descriptorBindingPartiallyBound &&
+        indexingFeatures.runtimeDescriptorArray;
+    retDevice->capabilities.bindlessBuffers =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind &&
+        indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind;
+    retDevice->capabilities.bindlessSampledImages =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingSampledImageUpdateAfterBind;
+    retDevice->capabilities.bindlessStorageImages =
+        retDevice->capabilities.bindlessDescriptors &&
+        indexingFeatures.descriptorBindingStorageImageUpdateAfterBind;
+    retDevice->capabilities.nullDescriptor = robustness2FeaturesForNullDescriptor.nullDescriptor;
     retDevice->capabilities.shaderDeviceAddress = deviceFeaturesAddressKhr.bufferDeviceAddress;
     retDevice->uncapturedErrorCallbackInfo = descriptor->uncapturedErrorCallbackInfo;
 
@@ -3450,7 +3495,8 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
         for(uint32_t i = 0;i < bgdesc->layout->entryCount;i++){
             const VkDescriptorType vkdt = extractVkDescriptorType(bgdesc->layout->entries + i);
             const uint32_t contiguousIndex = descriptorTypeContiguous(vkdt);
-            ++counts[contiguousIndex];
+            const uint32_t descriptorCount = bgdesc->layout->entries[i].bindingArraySize > 1 ? bgdesc->layout->entries[i].bindingArraySize : 1;
+            counts[contiguousIndex] += descriptorCount;
         }
         VkDescriptorPoolSize sizes[DESCRIPTOR_TYPE_UPPER_LIMIT] = {0};
         uint32_t VkDescriptorPoolSizeCount = 0;
@@ -3466,6 +3512,9 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
         dpci.poolSizeCount = VkDescriptorPoolSizeCount;
         dpci.pPoolSizes = sizes;
         dpci.maxSets = 1;
+        if(bgdesc->layout->bindless){
+            dpci.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+        }
         device->functions.vkCreateDescriptorPool(device->device, &dpci, NULL, &ret->pool);
 
         const VkDescriptorSetAllocateInfo dsai = {
@@ -3496,6 +3545,237 @@ WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDe
     return ret;
 }
 
+
+static const WGPUBindGroupLayoutEntry* findBindGroupLayoutEntry(WGPUBindGroupLayout layout, uint32_t binding){
+    for(uint32_t i = 0;i < layout->entryCount;i++){
+        if(layout->entries[i].binding == binding){
+            return layout->entries + i;
+        }
+    }
+    return NULL;
+}
+
+static void bindlessEntryAddRef(const WGPUBindGroupEntry* entry){
+    if(entry->buffer) wgpuBufferAddRef(entry->buffer);
+    if(entry->textureView) wgpuTextureViewAddRef(entry->textureView);
+    if(entry->sampler) wgpuSamplerAddRef(entry->sampler);
+}
+
+static void bindlessEntryRelease(const WGPUBindGroupEntry* entry){
+    if(entry->buffer) wgpuBufferRelease(entry->buffer);
+    if(entry->textureView) wgpuTextureViewRelease(entry->textureView);
+    if(entry->sampler) wgpuSamplerRelease(entry->sampler);
+}
+
+static BindlessSlot* findBindlessSlot(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    for(size_t i = 0;i < bindGroup->bindlessSlots.size;i++){
+        BindlessSlot* slot = bindGroup->bindlessSlots.data + i;
+        if(slot->entry.binding == binding && slot->arrayIndex == arrayIndex){
+            return slot;
+        }
+    }
+    return NULL;
+}
+
+static void storeBindlessSlot(WGPUBindGroup bindGroup, uint32_t arrayIndex, WGPUBindGroupEntry entry){
+    bindlessEntryAddRef(&entry);
+    BindlessSlot* existing = findBindlessSlot(bindGroup, entry.binding, arrayIndex);
+    if(existing){
+        bindlessEntryRelease(&existing->entry);
+        existing->entry = entry;
+        return;
+    }
+    BindlessSlotVector_push_back(&bindGroup->bindlessSlots, (BindlessSlot){ .arrayIndex = arrayIndex, .entry = entry });
+}
+
+static void removeBindlessSlot(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    BindlessSlot* existing = findBindlessSlot(bindGroup, binding, arrayIndex);
+    if(existing == NULL){
+        return;
+    }
+    bindlessEntryRelease(&existing->entry);
+    *existing = bindGroup->bindlessSlots.data[bindGroup->bindlessSlots.size - 1];
+    BindlessSlotVector_pop_back(&bindGroup->bindlessSlots);
+}
+
+static void releaseBindlessSlots(WGPUBindGroup bindGroup){
+    for(size_t i = 0;i < bindGroup->bindlessSlots.size;i++){
+        bindlessEntryRelease(&bindGroup->bindlessSlots.data[i].entry);
+    }
+    BindlessSlotVector_free(&bindGroup->bindlessSlots);
+}
+
+static void ce_trackBindlessSlot(WGPUCommandEncoder encoder, WGPUBindGroupLayout layout, const WGPUBindGroupEntry* entry){
+    const WGPUBindGroupLayoutEntry* layoutEntry = findBindGroupLayoutEntry(layout, entry->binding);
+    const VkPipelineStageFlags stage = toVulkanPipelineStageBits(layoutEntry->visibility);
+
+    switch(extractVkDescriptorType(layoutEntry)){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            ce_trackBuffer(encoder, entry->buffer, (BufferUsageSnap){
+                .stage = stage,
+                .access = extractVkAccessFlags(layoutEntry)
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            ce_trackTextureView(encoder, entry->textureView, (ImageUsageSnap){
+                .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .access = VK_ACCESS_SHADER_READ_BIT,
+                .stage = stage,
+                .subresource = entry->textureView->subresourceRange
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            ce_trackTextureView(encoder, entry->textureView, (ImageUsageSnap){
+                .layout = VK_IMAGE_LAYOUT_GENERAL,
+                .access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                .stage = stage,
+                .subresource = entry->textureView->subresourceRange
+            });
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            ru_trackSampler(&encoder->resourceUsage, entry->sampler);
+        }break;
+        default: break;
+    }
+}
+
+static void ce_trackBindlessSlots(WGPUCommandEncoder encoder, WGPUBindGroup group){
+    for(size_t i = 0;i < group->bindlessSlots.size;i++){
+        ce_trackBindlessSlot(encoder, group->layout, &group->bindlessSlots.data[i].entry);
+    }
+}
+
+void wgpuBindGroupUpdateEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex, const WGPUBindGroupEntry* entry){
+    ENTRY();
+    wgvk_assert(bindGroup->layout->bindless, "wgpuBindGroupUpdateEntry: bind group's layout was not created with WGPUBindGroupLayoutDescriptorBindless");
+
+    const WGPUBindGroupLayoutEntry* layoutEntry = NULL;
+    for(uint32_t i = 0;i < bindGroup->layout->entryCount;i++){
+        if(bindGroup->layout->entries[i].binding == binding){
+            layoutEntry = bindGroup->layout->entries + i;
+            break;
+        }
+    }
+    wgvk_assert(layoutEntry != NULL, "wgpuBindGroupUpdateEntry: binding not found in layout");
+    wgvk_assert(layoutEntry->bindingArraySize > 0 && arrayIndex < layoutEntry->bindingArraySize, "wgpuBindGroupUpdateEntry: binding is not an array or arrayIndex out of range");
+
+    const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
+
+    VkWriteDescriptorSet write zeroinit;
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = bindGroup->set;
+    write.dstBinding = binding;
+    write.dstArrayElement = arrayIndex;
+    write.descriptorCount = 1;
+    write.descriptorType = entryType;
+
+    VkDescriptorBufferInfo bufferInfo zeroinit;
+    VkDescriptorImageInfo imageInfo zeroinit;
+    WGPUBindGroupEntry stored zeroinit;
+    stored.binding = binding;
+
+    switch(entryType){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            WGPUBuffer bufferOfThatEntry = (WGPUBuffer)entry->buffer;
+            wgvk_assert(bufferOfThatEntry != NULL, "wgpuBindGroupUpdateEntry: entry->buffer is null");
+            stored.buffer = bufferOfThatEntry;
+            stored.offset = entry->offset;
+            stored.size   = entry->size;
+            bufferInfo.buffer = bufferOfThatEntry->buffer;
+            bufferInfo.offset = entry->offset;
+            bufferInfo.range  = entry->size;
+            write.pBufferInfo = &bufferInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            wgvk_assert(entry->textureView != NULL, "wgpuBindGroupUpdateEntry: entry->textureView is null");
+            stored.textureView = (WGPUTextureView)entry->textureView;
+            imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            write.pImageInfo = &imageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            wgvk_assert(entry->textureView != NULL, "wgpuBindGroupUpdateEntry: entry->textureView is null");
+            stored.textureView = (WGPUTextureView)entry->textureView;
+            imageInfo.imageView   = ((WGPUTextureView)entry->textureView)->view;
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            write.pImageInfo = &imageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLER:{
+            wgvk_assert(entry->sampler != NULL, "wgpuBindGroupUpdateEntry: entry->sampler is null");
+            stored.sampler = entry->sampler;
+            imageInfo.sampler = entry->sampler->sampler;
+            write.pImageInfo = &imageInfo;
+        }break;
+        default:
+            wgvk_assert(0, "wgpuBindGroupUpdateEntry: unsupported descriptor type for bindless update");
+            return;
+    }
+
+    bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    storeBindlessSlot(bindGroup, arrayIndex, stored);
+    EXIT();
+}
+
+
+void wgpuBindGroupClearEntry(WGPUBindGroup bindGroup, uint32_t binding, uint32_t arrayIndex){
+    ENTRY();
+    wgvk_assert(bindGroup->layout->bindless, "wgpuBindGroupClearEntry: bind group's layout was not created with WGPUBindGroupLayoutDescriptorBindless");
+    wgvk_assert(bindGroup->device->capabilities.nullDescriptor, "wgpuBindGroupClearEntry: device does not support nullDescriptor");
+
+    const WGPUBindGroupLayoutEntry* layoutEntry = NULL;
+    for(uint32_t i = 0;i < bindGroup->layout->entryCount;i++){
+        if(bindGroup->layout->entries[i].binding == binding){
+            layoutEntry = bindGroup->layout->entries + i;
+            break;
+        }
+    }
+    wgvk_assert(layoutEntry != NULL, "wgpuBindGroupClearEntry: binding not found in layout");
+    wgvk_assert(layoutEntry->bindingArraySize > 0 && arrayIndex < layoutEntry->bindingArraySize, "wgpuBindGroupClearEntry: binding is not an array or arrayIndex out of range");
+
+    const VkDescriptorType entryType = extractVkDescriptorType(layoutEntry);
+
+    VkWriteDescriptorSet write zeroinit;
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = bindGroup->set;
+    write.dstBinding = binding;
+    write.dstArrayElement = arrayIndex;
+    write.descriptorCount = 1;
+    write.descriptorType = entryType;
+
+    VkDescriptorBufferInfo nullBufferInfo zeroinit;
+    VkDescriptorImageInfo nullImageInfo zeroinit;
+
+    switch(entryType){
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:{
+            nullBufferInfo.buffer = VK_NULL_HANDLE;
+            nullBufferInfo.offset = 0;
+            nullBufferInfo.range = VK_WHOLE_SIZE;
+            write.pBufferInfo = &nullBufferInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:{
+            nullImageInfo.imageView = VK_NULL_HANDLE;
+            nullImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            write.pImageInfo = &nullImageInfo;
+        }break;
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:{
+            nullImageInfo.imageView = VK_NULL_HANDLE;
+            nullImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            write.pImageInfo = &nullImageInfo;
+        }break;
+        // nullDescriptor does not cover samplers; VK_DESCRIPTOR_TYPE_SAMPLER falls through to the assert.
+        default:
+            wgvk_assert(0, "wgpuBindGroupClearEntry: unsupported descriptor type for a bindless array");
+            EXIT();
+            return;
+    }
+
+    bindGroup->device->functions.vkUpdateDescriptorSets(bindGroup->device->device, 1, &write, 0, NULL);
+    removeBindlessSlot(bindGroup, binding, arrayIndex);
+    EXIT();
+}
 
 
 WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGPUBindGroupLayoutDescriptor* bgldesc){
@@ -3533,7 +3813,63 @@ WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGP
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     };
 
+    int isBindless = 0;
+    for(const WGPUChainedStruct* descriptorChain = bgldesc->nextInChain; descriptorChain != NULL; descriptorChain = descriptorChain->next){
+        if(descriptorChain->sType == WGPUSType_BindGroupLayoutDescriptorBindless){
+            isBindless = 1;
+            break;
+        }
+    }
+    ret->bindless = isBindless;
+
+    for(uint32_t i = 0;i < entryCount;i++){
+        if(entries[i].bindingArraySize > 1){
+            vkBindings.data[i].descriptorCount = entries[i].bindingArraySize;
+        }
+    }
+
+    VkDescriptorBindingFlags* bindingFlags = NULL;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo;
+    if(isBindless){
+        wgvk_assert(device->capabilities.bindlessDescriptors, "wgpuDeviceCreateBindGroupLayout: WGPUBindGroupLayoutDescriptorBindless requested but the device does not support bindless descriptors");
+
+        bindingFlags = (VkDescriptorBindingFlags*)RL_CALLOC(entryCount, sizeof(VkDescriptorBindingFlags));
+        for(uint32_t i = 0;i < entryCount;i++){
+            if(entries[i].bindingArraySize > 0){
+                const VkDescriptorType arrayEntryType = extractVkDescriptorType(entries + i);
+                switch(arrayEntryType){
+                    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+                    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+                        wgvk_assert(device->capabilities.bindlessBuffers, "wgpuDeviceCreateBindGroupLayout: bindless buffer array requested but the device does not support update-after-bind buffer descriptors");
+                        break;
+                    case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+                    case VK_DESCRIPTOR_TYPE_SAMPLER:
+                        wgvk_assert(device->capabilities.bindlessSampledImages, "wgpuDeviceCreateBindGroupLayout: bindless sampled image/sampler array requested but the device does not support update-after-bind sampled image descriptors");
+                        break;
+                    case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+                        wgvk_assert(device->capabilities.bindlessStorageImages, "wgpuDeviceCreateBindGroupLayout: bindless storage image array requested but the device does not support update-after-bind storage image descriptors");
+                        break;
+                    default:
+                        wgvk_assert(0, "wgpuDeviceCreateBindGroupLayout: unsupported descriptor type for a bindless array");
+                        break;
+                }
+                bindingFlags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+            }
+        }
+
+        bindingFlagsInfo = (VkDescriptorSetLayoutBindingFlagsCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .bindingCount = entryCount,
+            .pBindingFlags = bindingFlags,
+        };
+        slci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+        slci.pNext = &bindingFlagsInfo;
+    }
+
     VkResult createResult = device->functions.vkCreateDescriptorSetLayout(device->device, &slci, NULL, &ret->layout);
+    if(bindingFlags){
+        RL_FREE(bindingFlags);
+    }
     if(createResult != VK_SUCCESS){
         RL_FREE(ret);
         return NULL;
@@ -4328,7 +4664,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
             const RenderPassCommandSetBindGroup* cmdSetBindGroup = &cmd->setBindGroup;
             const WGPUBindGroup       group  = cmdSetBindGroup->group;
             const WGPUBindGroupLayout layout = group->layout;
-            for(uint32_t bindingIndex = 0;bindingIndex < layout->entryCount;bindingIndex++){
+            for(uint32_t bindingIndex = 0;bindingIndex < group->entryCount;bindingIndex++){
 
                 wgvk_assert(group->entries[bindingIndex].binding == layout->entries[bindingIndex].binding, "Mismatch between layout and group, this will cause bugs.");
 
@@ -4384,6 +4720,7 @@ void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder){
                     );
                 }
             }
+            ce_trackBindlessSlots(renderPassEncoder->cmdEncoder, group);
         }
     }
     #if VULKAN_USE_DYNAMIC_RENDERING == 0
@@ -4915,6 +5252,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                             });
                         }
                     }
+                    ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
             }
             device->functions.vkCmdDispatch(
@@ -4943,6 +5281,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                             });
                         }
                     }
+                    ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
             }
 
@@ -6233,6 +6572,7 @@ void wgpuBindGroupRelease(WGPUBindGroup dshandle) {
     ENTRY();
     if (--dshandle->refCount == 0) {
         releaseAllAndClear(&dshandle->resourceUsage);
+        releaseBindlessSlots(dshandle);
 
         WGPUBindGroupLayout stillThere = wgpuBindGroupLayoutRelease_withReturn(dshandle->layout);
         if(stillThere){
@@ -7291,7 +7631,7 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
             const RenderPassCommandSetBindGroup* cmdSetBindGroup = &cmd->setBindGroup;
             const WGPUBindGroup       group  = cmdSetBindGroup->group;
             const WGPUBindGroupLayout layout = group->layout;
-            for(uint32_t bindingIndex = 0;bindingIndex < layout->entryCount;bindingIndex++){
+            for(uint32_t bindingIndex = 0;bindingIndex < group->entryCount;bindingIndex++){
 
                 wgvk_assert(group->entries[bindingIndex].binding == layout->entries[bindingIndex].binding, "Mismatch between layout and group, this will cause bugs.");
 
@@ -7346,6 +7686,7 @@ void wgpuRaytracingPassEncoderEnd(WGPURaytracingPassEncoder rtPassEncoder){
                     );
                 }
             }
+            ce_trackBindlessSlots(rtPassEncoder->cmdEncoder, group);
         }
     }
     recordVkCommands(rtPassEncoder->cmdEncoder, rtPassEncoder->device, &rtPassEncoder->bufferedCommands, NULL);
@@ -11250,6 +11591,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
     WGPURayTracingAccelerationContainer ret = RL_CALLOC(1, sizeof(WGPURayTracingAccelerationContainerImpl));
     ret->level = descriptor->level;
     ret->device = device;
+    ret->refCount = 1;
 
     // For BLAS, geometryCount is the number of meshes.
     // For TLAS, geometryCount is 1 (A single geometry of type INSTANCES containing N primitives).
@@ -11521,6 +11863,44 @@ void wgpuCommandEncoderCopyRayTracingAccelerationContainer(WGPUCommandEncoder en
 void wgpuCommandEncoderUpdateRayTracingAccelerationContainer(WGPUCommandEncoder encoder, WGPURayTracingAccelerationContainer container){
     ENTRY();
 
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerAddRef(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    ++container->refCount;
+    EXIT();
+}
+
+void wgpuRayTracingAccelerationContainerRelease(WGPURayTracingAccelerationContainer container){
+    ENTRY();
+    if(--container->refCount == 0){
+        WGPUDevice device = container->device;
+
+        device->functions.vkDestroyAccelerationStructureKHR(device->device, container->accelerationStructure, NULL);
+
+        for(uint32_t i = 0; i < container->geometryCount; i++){
+            if(container->inputGeometryBuffers && container->inputGeometryBuffers[i]){
+                wgpuBufferRelease(container->inputGeometryBuffers[i]);
+            }
+        }
+        RL_FREE(container->inputGeometryBuffers);
+        RL_FREE(container->geometries);
+        RL_FREE(container->buildRangeInfos);
+        RL_FREE(container->primitiveCounts);
+
+        if(container->instanceBuffer){
+            wgpuBufferRelease(container->instanceBuffer);
+        }
+        if(container->updateScratchBuffer){
+            wgpuBufferRelease(container->updateScratchBuffer);
+        }
+        wgpuBufferRelease(container->accelerationStructureBuffer);
+        wgpuBufferRelease(container->buildScratchBuffer);
+
+        wgpuDeviceRelease(device);
+        RL_FREE(container);
+    }
     EXIT();
 }
 
