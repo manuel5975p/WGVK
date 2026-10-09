@@ -3605,7 +3605,7 @@ static void releaseBindlessSlots(WGPUBindGroup bindGroup){
     BindlessSlotVector_free(&bindGroup->bindlessSlots);
 }
 
-static void ce_trackBindlessSlot(WGPUCommandEncoder encoder, WGPUBindGroupLayout layout, const WGPUBindGroupEntry* entry){
+static void ce_trackBindGroupEntry(WGPUCommandEncoder encoder, WGPUBindGroupLayout layout, const WGPUBindGroupEntry* entry){
     const WGPUBindGroupLayoutEntry* layoutEntry = findBindGroupLayoutEntry(layout, entry->binding);
     const VkPipelineStageFlags stage = toVulkanPipelineStageBits(layoutEntry->visibility);
 
@@ -3642,7 +3642,7 @@ static void ce_trackBindlessSlot(WGPUCommandEncoder encoder, WGPUBindGroupLayout
 
 static void ce_trackBindlessSlots(WGPUCommandEncoder encoder, WGPUBindGroup group){
     for(size_t i = 0;i < group->bindlessSlots.size;i++){
-        ce_trackBindlessSlot(encoder, group->layout, &group->bindlessSlots.data[i].entry);
+        ce_trackBindGroupEntry(encoder, group->layout, &group->bindlessSlots.data[i].entry);
     }
 }
 
@@ -5235,22 +5235,11 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         break;
         case cp_command_type_dispatch_workgroups: {
             const ComputePassCommandDispatchWorkgroups* dispatch = &command->dispatchWorkgroups;
-            //ce_trackBuffer(WGPUCommandEncoder encoder, WGPUBuffer buffer, BufferUsageSnap usage)
             for(uint32_t groupIndex = 0;groupIndex < 8;groupIndex++){
                 if(destination_->computeBindGroups[groupIndex]){
                     const WGPUBindGroup group = destination_->computeBindGroups[groupIndex];
                     for(uint32_t entryIndex = 0;entryIndex < group->entryCount;entryIndex++){
-                        const WGPUBindGroupEntry* entry = group->entries + entryIndex;
-                        uint32_t bglEntryIndex = 0;
-                        for(;bglEntryIndex < group->layout->entryCount;bglEntryIndex++){
-                            if(group->layout->entries[bglEntryIndex].binding == entry->binding)break;
-                        }
-                        if(entry->buffer){
-                            ce_trackBuffer(destination_->cmdEncoder, entry->buffer, (BufferUsageSnap){
-                                .access = extractVkAccessFlags(group->layout->entries + bglEntryIndex),
-                                .stage  = toVulkanPipelineStageBits(group->layout->entries[bglEntryIndex].visibility)
-                            });
-                        }
+                        ce_trackBindGroupEntry(destination_->cmdEncoder, group->layout, group->entries + entryIndex);
                     }
                     ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
@@ -5269,17 +5258,7 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
                 if(destination_->computeBindGroups[groupIndex]){
                     const WGPUBindGroup group = destination_->computeBindGroups[groupIndex];
                     for(uint32_t entryIndex = 0;entryIndex < group->entryCount;entryIndex++){
-                        const WGPUBindGroupEntry* entry = group->entries + entryIndex;
-                        uint32_t bglEntryIndex = 0;
-                        for(;bglEntryIndex < group->layout->entryCount;bglEntryIndex++){
-                            if(group->layout->entries[bglEntryIndex].binding == entry->binding)break;
-                        }
-                        if(entry->buffer){
-                            ce_trackBuffer(destination_->cmdEncoder, entry->buffer, (BufferUsageSnap){
-                                .access = extractVkAccessFlags(group->layout->entries + bglEntryIndex),
-                                .stage  = toVulkanPipelineStageBits(group->layout->entries[bglEntryIndex].visibility)
-                            });
-                        }
+                        ce_trackBindGroupEntry(destination_->cmdEncoder, group->layout, group->entries + entryIndex);
                     }
                     ce_trackBindlessSlots(destination_->cmdEncoder, group);
                 }
