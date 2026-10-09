@@ -8270,7 +8270,7 @@ RGAPI void ru_trackSampler         (ResourceUsage* resourceUsage, WGPUSampler sa
 }
 
 RGAPI void ru_trackAccelerationStructure(ResourceUsage* resourceUsage, WGPURayTracingAccelerationContainer accelerationStructure){
-    if(WGPURayTracingAccelerationContainerSet_add(&resourceUsage->referencedAccelerationStructures, accelerationStructure)){
+    if(WGPURayTracingAccelerationContainerUsageSet_add(&resourceUsage->referencedAccelerationStructures, accelerationStructure)){
         ++accelerationStructure->refCount;
     }
 }
@@ -11399,7 +11399,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
-    WGPURayTracingAccelerationContainerSet_for_each(&resourceUsage->referencedAccelerationStructures, accelerationStructureReleaseCallback, NULL);
+    WGPURayTracingAccelerationContainerUsageSet_for_each(&resourceUsage->referencedAccelerationStructures, accelerationStructureReleaseCallback, NULL);
 
     BufferUsageRecordMap_free(&resourceUsage->referencedBuffers);
     ImageUsageRecordMap_free(&resourceUsage->referencedTextures);
@@ -11411,7 +11411,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
-    WGPURayTracingAccelerationContainerSet_free(&resourceUsage->referencedAccelerationStructures);
+    WGPURayTracingAccelerationContainerUsageSet_free(&resourceUsage->referencedAccelerationStructures);
 }
 
 

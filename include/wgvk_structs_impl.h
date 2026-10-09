@@ -1672,7 +1672,7 @@ DEFINE_PTR_HASH_SET (CONTAINERAPI, RenderBundleUsageSet, WGPURenderBundle)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, QuerySetUsageSet, WGPUQuerySet)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPUComputePassEncoderSet, WGPUComputePassEncoder)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURaytracingPassEncoderSet, WGPURaytracingPassEncoder)
-DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURayTracingAccelerationContainerSet, WGPURayTracingAccelerationContainer)
+DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURayTracingAccelerationContainerUsageSet, WGPURayTracingAccelerationContainer)
 
 DEFINE_VECTOR (static inline, VkDynamicState, VkDynamicStateVector)
 DEFINE_VECTOR (CONTAINERAPI, VkWriteDescriptorSet, VkWriteDescriptorSetVector)
@@ -1731,7 +1731,7 @@ typedef struct ResourceUsage{
     RaytracingPipelineUsageSet referencedRaytracingPipelines;
     RenderBundleUsageSet referencedRenderBundles;
     QuerySetUsageSet referencedQuerySets;
-    WGPURayTracingAccelerationContainerSet referencedAccelerationStructures;
+    WGPURayTracingAccelerationContainerUsageSet referencedAccelerationStructures;
     //LayoutAssumptions entryAndFinalLayouts;
 }ResourceUsage;
 
@@ -1744,7 +1744,7 @@ static inline void ResourceUsage_free(ResourceUsage* ru){
     SamplerUsageSet_free(&ru->referencedSamplers);
     QuerySetUsageSet_free(&ru->referencedQuerySets);
     RenderBundleUsageSet_free(&ru->referencedRenderBundles);
-    WGPURayTracingAccelerationContainerSet_free(&ru->referencedAccelerationStructures);
+    WGPURayTracingAccelerationContainerUsageSet_free(&ru->referencedAccelerationStructures);
 }
 
 static inline void ResourceUsage_move(ResourceUsage* dest, ResourceUsage* source){
@@ -1754,7 +1754,7 @@ static inline void ResourceUsage_move(ResourceUsage* dest, ResourceUsage* source
     BindGroupUsageSet_move(&dest->referencedBindGroups, &source->referencedBindGroups);
     BindGroupLayoutUsageSet_move(&dest->referencedBindGroupLayouts, &source->referencedBindGroupLayouts);
     SamplerUsageSet_move(&dest->referencedSamplers, &source->referencedSamplers);
-    WGPURayTracingAccelerationContainerSet_move(&dest->referencedAccelerationStructures, &source->referencedAccelerationStructures);
+    WGPURayTracingAccelerationContainerUsageSet_move(&dest->referencedAccelerationStructures, &source->referencedAccelerationStructures);
     QuerySetUsageSet_free(&dest->referencedQuerySets);
     RenderBundleUsageSet_free(&dest->referencedRenderBundles);
     //LayoutAssumptions_move(&dest->entryAndFinalLayouts, &source->entryAndFinalLayouts);
@@ -1769,7 +1769,7 @@ static inline void ResourceUsage_init(ResourceUsage* ru){
     SamplerUsageSet_init(&ru->referencedSamplers);
     RenderBundleUsageSet_init(&ru->referencedRenderBundles);
     QuerySetUsageSet_init(&ru->referencedQuerySets);
-    WGPURayTracingAccelerationContainerSet_init(&ru->referencedAccelerationStructures);
+    WGPURayTracingAccelerationContainerUsageSet_init(&ru->referencedAccelerationStructures);
     //LayoutAssumptions_init(&ru->entryAndFinalLayouts);
 }
 
