@@ -5397,6 +5397,79 @@ TEST_F(WebGPUTest, ComputeDispatchIndirectTracksSampledTextureAsShaderReadOnly) 
     EXPECT_TRUE(tracked->lastStage & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 }
 
+TEST_F(WebGPUTest, RenderPassSetBindGroupTracksStorageTextureAsGeneral) {
+    WGPUTextureDescriptor textureDesc = {};
+    textureDesc.size = {4, 4, 1};
+    textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    textureDesc.mipLevelCount = 1;
+    textureDesc.sampleCount = 1;
+    textureDesc.dimension = WGPUTextureDimension_2D;
+    textureDesc.usage = WGPUTextureUsage_StorageBinding;
+    WGPUTexture storageTexture = wgpuDeviceCreateTexture(device, &textureDesc);
+    WGPUTextureView storageView = wgpuTextureCreateView(storageTexture, nullptr);
+    textureDesc.usage = WGPUTextureUsage_RenderAttachment;
+    WGPUTexture target = wgpuDeviceCreateTexture(device, &textureDesc);
+    WGPUTextureView targetView = wgpuTextureCreateView(target, nullptr);
+
+    WGPUBindGroupLayoutEntry layoutEntry = {};
+    layoutEntry.binding = 0;
+    layoutEntry.visibility = WGPUShaderStage_Fragment;
+    layoutEntry.storageTexture.access = WGPUStorageTextureAccess_ReadOnly;
+    layoutEntry.storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+    layoutEntry.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+    WGPUBindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 1;
+    bglDesc.entries = &layoutEntry;
+    WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+
+    WGPUBindGroupEntry bgEntry = {};
+    bgEntry.binding = 0;
+    bgEntry.textureView = storageView;
+    WGPUBindGroupDescriptor bgDesc = {};
+    bgDesc.layout = bgl;
+    bgDesc.entryCount = 1;
+    bgDesc.entries = &bgEntry;
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(device, &bgDesc);
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    WGPURenderPassColorAttachment attachment = {};
+    attachment.view = targetView;
+    attachment.loadOp = WGPULoadOp_Clear;
+    attachment.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor passDesc = {};
+    passDesc.colorAttachmentCount = 1;
+    passDesc.colorAttachments = &attachment;
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    std::optional<ImageUsageRecord> tracked;
+    if (const ImageUsageRecord* record = ImageUsageRecordMap_get(&encoder->resourceUsage.referencedTextures, storageTexture)) {
+        tracked = *record;
+    }
+
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &commandBuffer);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(commandBuffer);
+    wgpuQueueWaitIdle(queue);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBindGroupRelease(bindGroup);
+    wgpuBindGroupLayoutRelease(bgl);
+    wgpuTextureViewRelease(targetView);
+    wgpuTextureRelease(target);
+    wgpuTextureViewRelease(storageView);
+    wgpuTextureRelease(storageTexture);
+
+    ASSERT_TRUE(tracked.has_value()) << "the render pass did not track its storage texture";
+    EXPECT_EQ(tracked->initialLayout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_EQ(tracked->lastLayout, VK_IMAGE_LAYOUT_GENERAL);
+    EXPECT_TRUE(tracked->lastAccess & VK_ACCESS_SHADER_WRITE_BIT);
+    EXPECT_TRUE(tracked->lastStage & VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+}
+
 // ============================================================
 // P1 Advanced Copy Tests
 // ============================================================
