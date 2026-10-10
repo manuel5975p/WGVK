@@ -6529,6 +6529,12 @@ void wgpuRaytracingPipelineRelease(WGPURaytracingPipeline pipeline){
     EXIT();
 }
 
+void wgpuRayTracingShaderBindingTableAddRef(WGPURayTracingShaderBindingTable shaderBindingTable){
+}
+
+void wgpuRayTracingShaderBindingTableRelease(WGPURayTracingShaderBindingTable shaderBindingTable){
+}
+
 void wgpuBufferRelease(WGPUBuffer buffer) {
     ENTRY();
     if (--buffer->refCount == 0) {
