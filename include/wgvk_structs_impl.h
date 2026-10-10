@@ -2453,6 +2453,7 @@ typedef struct WGPUComputePipelineImpl{
 
 typedef struct WGPURaytracingPipelineImpl{
     VkPipeline raytracingPipeline;
+    WGPUDevice device;
     refcount_type refCount;
     WGPUPipelineLayout layout;
     WGPUBuffer sbtBuffer;

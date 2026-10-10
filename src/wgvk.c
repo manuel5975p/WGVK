@@ -6513,9 +6513,20 @@ void wgpuComputePipelineRelease(WGPUComputePipeline pipeline){
 }
 
 void wgpuRaytracingPipelineAddRef(WGPURaytracingPipeline pipeline){
+    ENTRY();
+    ++pipeline->refCount;
+    EXIT();
 }
 
 void wgpuRaytracingPipelineRelease(WGPURaytracingPipeline pipeline){
+    ENTRY();
+    if(--pipeline->refCount == 0){
+        wgpuBufferRelease(pipeline->sbtBuffer);
+        wgpuPipelineLayoutRelease(pipeline->layout);
+        pipeline->device->functions.vkDestroyPipeline(pipeline->device->device, pipeline->raytracingPipeline, NULL);
+        RL_FREE(pipeline);
+    }
+    EXIT();
 }
 
 void wgpuBufferRelease(WGPUBuffer buffer) {
@@ -7622,6 +7633,7 @@ WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncod
     WGPURaytracingPassEncoder rtenc = RL_CALLOC(1, sizeof(WGPURaytracingPassEncoderImpl));
     rtenc->device = enc->device;
     rtenc->refCount = 2;
+    WGPURaytracingPassEncoderSet_add(&enc->referencedRTs, rtenc);
     RenderPassCommandGenericVector_init(&rtenc->bufferedCommands);
     rtenc->cmdEncoder = enc;
     rtenc->cmdBuffer = enc->buffer;
@@ -8549,6 +8561,9 @@ static inline void samplerReleaseCallback(WGPUSampler sampler, void* unused){
 }
 static inline void computePipelineReleaseCallback(WGPUComputePipeline computePipeline, void* unused){
     wgpuComputePipelineRelease(computePipeline);
+}
+static inline void raytracingPipelineReleaseCallback(WGPURaytracingPipeline raytracingPipeline, void* unused){
+    wgpuRaytracingPipelineRelease(raytracingPipeline);
 }
 static inline void renderPipelineReleaseCallback(WGPURenderPipeline renderPipeline, void* unused){
     wgpuRenderPipelineRelease(renderPipeline);
@@ -11399,6 +11414,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     BindGroupLayoutUsageSet_for_each(&resourceUsage->referencedBindGroupLayouts, bindGroupLayoutReleaseCallback, NULL);
     SamplerUsageSet_for_each(&resourceUsage->referencedSamplers, samplerReleaseCallback, NULL);
     ComputePipelineUsageSet_for_each(&resourceUsage->referencedComputePipelines, computePipelineReleaseCallback, NULL);
+    RaytracingPipelineUsageSet_for_each(&resourceUsage->referencedRaytracingPipelines, raytracingPipelineReleaseCallback, NULL);
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
@@ -11410,6 +11426,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     BindGroupLayoutUsageSet_free(&resourceUsage->referencedBindGroupLayouts);
     SamplerUsageSet_free(&resourceUsage->referencedSamplers);
     ComputePipelineUsageSet_free(&resourceUsage->referencedComputePipelines);
+    RaytracingPipelineUsageSet_free(&resourceUsage->referencedRaytracingPipelines);
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
@@ -11522,6 +11539,8 @@ static inline uint32_t roundup_to_multiple(uint32_t x, uint32_t multipleOf){
 WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, const WGPURayTracingPipelineDescriptor* descriptor){
     ENTRY();
     WGPURaytracingPipeline ret = RL_CALLOC(1, sizeof(WGPURaytracingPipelineImpl));
+    ret->device = device;
+    ret->refCount = 1;
     ret->layout = descriptor->layout;
     wgpuPipelineLayoutAddRef(ret->layout);
 
