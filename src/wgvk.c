@@ -7466,31 +7466,7 @@ void wgpuRenderPassEncoderSetBindGroup(WGPURenderPassEncoder rpe, uint32_t group
 
 
     for(uint32_t i = 0;i < group->entryCount;i++){
-
-        const WGPUBindGroupEntry* entry = &group->entries[i];
-
-        if(entry->buffer){
-            const VkAccessFlags accessFlags = extractVkAccessFlags(group->layout->entries + i);
-            const VkPipelineStageFlags stage = toVulkanPipelineStageBits(group->layout->entries[i].visibility);
-            ce_trackBuffer(rpe->cmdEncoder, entry->buffer, (BufferUsageSnap){
-                .stage = stage,
-                .access = accessFlags
-            });
-        }
-
-        if(entry->textureView){
-            const VkAccessFlags accessFlags = extractVkAccessFlags(group->layout->entries + i);
-            const VkPipelineStageFlags stage = toVulkanPipelineStageBits(group->layout->entries[i].visibility) | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-            //VkImageLayout layout = (extractVkDescriptorType(group->layout->entries + i) == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            ce_trackTextureView(rpe->cmdEncoder, entry->textureView, (ImageUsageSnap){
-                .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .access = accessFlags,
-                .stage = stage,
-                .subresource = entry->textureView->subresourceRange
-            });
-        }
+        ce_trackBindGroupEntry(rpe->cmdEncoder, group->layout, group->entries + i);
     }
     ru_trackBindGroup(&rpe->resourceUsage, group);
     EXIT();
