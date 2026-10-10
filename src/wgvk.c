@@ -6530,9 +6530,23 @@ void wgpuRaytracingPipelineRelease(WGPURaytracingPipeline pipeline){
 }
 
 void wgpuRayTracingShaderBindingTableAddRef(WGPURayTracingShaderBindingTable shaderBindingTable){
+    ENTRY();
+    ++shaderBindingTable->refCount;
+    EXIT();
 }
 
 void wgpuRayTracingShaderBindingTableRelease(WGPURayTracingShaderBindingTable shaderBindingTable){
+    ENTRY();
+    if(--shaderBindingTable->refCount == 0){
+        for(uint32_t i = 0;i < shaderBindingTable->shaderStageCount;i++){
+            wgpuShaderModuleRelease(shaderBindingTable->shaderModules[i]);
+        }
+        RL_FREE(shaderBindingTable->shaderModules);
+        RL_FREE(shaderBindingTable->shaderGroups);
+        RL_FREE(shaderBindingTable->shaderStages);
+        RL_FREE(shaderBindingTable);
+    }
+    EXIT();
 }
 
 void wgpuBufferRelease(WGPUBuffer buffer) {
@@ -11516,7 +11530,10 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
     }
     ret->shaderStageCount = descriptor->stageCount;
     ret->shaderStages = RL_CALLOC(descriptor->stageCount, sizeof(VkPipelineShaderStageCreateInfo));
+    ret->shaderModules = RL_CALLOC(descriptor->stageCount, sizeof(WGPUShaderModule));
     for(uint32_t i = 0;i < descriptor->stageCount;i++){
+        ret->shaderModules[i] = descriptor->stages[i].module;
+        wgpuShaderModuleAddRef(ret->shaderModules[i]);
         VkShaderModule vkModule = VK_NULL_HANDLE;
         if(descriptor->stages[i].module->vulkanModuleMultiEP){
             vkModule = descriptor->stages[i].module->vulkanModuleMultiEP;

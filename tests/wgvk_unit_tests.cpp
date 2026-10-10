@@ -6504,6 +6504,7 @@ MinimalRaytracingPipeline createMinimalRaytracingPipeline(WGPUDevice device) {
     pipelineDesc.layout = layout;
     pipelineDesc.rayTracingState.shaderBindingTable = sbt;
     WGPURaytracingPipeline pipeline = wgpuDeviceCreateRayTracingPipeline(device, &pipelineDesc);
+    wgpuRayTracingShaderBindingTableRelease(sbt);
     return { raygen, layout, pipeline };
 }
 

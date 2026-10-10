@@ -2098,6 +2098,7 @@ typedef struct WGPURayTracingShaderBindingTableImpl{
     uint32_t shaderStageCount;
     VkRayTracingShaderGroupCreateInfoKHR* shaderGroups;
     VkPipelineShaderStageCreateInfo* shaderStages;
+    WGPUShaderModule* shaderModules;
     WGPUDevice device;
 }WGPURayTracingShaderBindingTableImpl;
 
