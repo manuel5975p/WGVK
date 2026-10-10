@@ -11691,7 +11691,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
 
         WGPUBufferDescriptor vfbDesc = {
             .size = descriptor->instanceCount * sizeof(VkAccelerationStructureInstanceKHR),
-            .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress,
+            .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst,
         };
 
         ret->instanceBuffer = wgpuDeviceCreateBuffer(device, &vfbDesc);
