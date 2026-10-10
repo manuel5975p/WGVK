@@ -2807,18 +2807,24 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         .usage = toVulkanBufferUsage(desc->usage),
     };
 
-    VkMemoryPropertyFlags propertyToFind = 0;
-    if(desc->usage & (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite)){
-        propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    // Host-visibility has to be required: VMA treats every memory type as a candidate
+    // when requiredFlags is 0, so a mappable buffer could come back from a
+    // DEVICE_LOCAL-only type and fail vkMapMemory. Device-locality stays preferred,
+    // since falling back to host-visible memory beats failing the allocation.
+    VkMemoryPropertyFlags requiredProperties = 0;
+    VkMemoryPropertyFlags preferredProperties = 0;
+    if((desc->usage & (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite)) || desc->mappedAtCreation){
+        requiredProperties = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
     }
     else{
-        // propertyToFind = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        propertyToFind = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        preferredProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     }
+    const VkMemoryPropertyFlags propertyToFind = requiredProperties | preferredProperties;
 
     #if USE_VMA_ALLOCATOR == 1
         VmaAllocationCreateInfo vallocInfo = {
-            .preferredFlags = propertyToFind,
+            .requiredFlags = requiredProperties,
+            .preferredFlags = preferredProperties,
         };
         VmaAllocation allocation zeroinit;
         VmaAllocationInfo allocationInfo zeroinit;
@@ -2831,6 +2837,7 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         }
         wgpuBuffer->vmaAllocation = allocation;
         wgpuBuffer->allocationType = AllocationTypeVMA;
+        vmaGetAllocationMemoryProperties(device->allocator, allocation, &wgpuBuffer->memoryProperties);
     #else
         device->functions.vkCreateBuffer(device->device, &bufferDesc, NULL, &wgpuBuffer->buffer);
         wgvkAllocation allocation = {0};
@@ -2849,9 +2856,11 @@ WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor*
         }
         wgpuBuffer->allocationType = AllocationTypeBuiltin;
         wgpuBuffer->builtinAllocation = allocation;
+        const uint32_t memoryTypeIndex = allocation.pool->memoryTypeIndex;
+        const VkMemoryType* memoryTypes = device->builtinAllocator.memoryProperties.memoryTypes;
+        wgpuBuffer->memoryProperties = memoryTypes[memoryTypeIndex].propertyFlags;
     device->functions.vkBindBufferMemory(device->device, wgpuBuffer->buffer, allocation.pool->chunks[allocation.chunk_index].memory, allocation.offset);
     #endif
-    wgpuBuffer->memoryProperties = propertyToFind;
 
     if(desc->usage & WGPUBufferUsage_ShaderDeviceAddress){
         const VkBufferDeviceAddressInfo bdai = {
@@ -3002,7 +3011,7 @@ void wgpuQueueWriteBuffer(WGPUQueue cSelf, WGPUBuffer buffer, uint64_t bufferOff
         stDesc.size = size;
         stDesc.usage = WGPUBufferUsage_MapWrite;
         WGPUBuffer stagingBuffer = wgpuDeviceCreateBuffer(cSelf->device, &stDesc);
-        wgpuQueueWriteBuffer(cSelf, stagingBuffer, bufferOffset, data, size);
+        wgpuQueueWriteBuffer(cSelf, stagingBuffer, 0, data, size);
         wgpuCommandEncoderCopyBufferToBuffer(cSelf->presubmitCache, stagingBuffer, 0, buffer, bufferOffset, size);
         wgpuBufferRelease(stagingBuffer);
     }
@@ -5772,11 +5781,14 @@ void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuff
             for(size_t refbEntry = 0;refbEntry < map.current_capacity;refbEntry++){
                 const BufferUsageRecordMap_kv_pair* kv_pair = map.table + refbEntry;
                 WGPUBuffer keybuffer = kv_pair->key;
-                // TODO: since this causes a lot of unnecessary fence action
-                // we should only wait for fences if these buffers are going to be mapped
-                // However it is possible all buffers are allocated with the HOST_VISIBLE bit
-                // Also everWrittenTo is currently always set to true
-                if((kv_pair->key != PHM_DELETED_SLOT_KEY && kv_pair->key != PHM_EMPTY_SLOT_KEY) /*&& kv_pair->value.everWrittenTo != VK_FALSE && (keybuffer->usage & (WGPUBufferUsage_MapWrite | WGPUBufferUsage_MapRead))*/){
+                // wgpuBufferMap is the only place that waits on latestFence, so a buffer
+                // without MapRead or MapWrite can never reach it and does not need stamping.
+                // Narrowing this further has to be per direction: a MapRead buffer only needs
+                // the fence once the GPU has written it, but a MapWrite buffer needs it as soon
+                // as the GPU reads it, so everWrittenTo alone would drop the fence that keeps
+                // the host from overwriting a copy source still in flight.
+                bool isOccupiedSlot = kv_pair->key != PHM_DELETED_SLOT_KEY && kv_pair->key != PHM_EMPTY_SLOT_KEY;
+                if(isOccupiedSlot && (keybuffer->usage & (WGPUBufferUsage_MapWrite | WGPUBufferUsage_MapRead))){
                     if(keybuffer->latestFence)
                         wgpuFenceRelease(keybuffer->latestFence);
                     keybuffer->latestFence = fence;
@@ -8081,6 +8093,11 @@ void wgpuRenderPassEncoderDrawIndexedIndirect(WGPURenderPassEncoder renderPassEn
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+
+    ce_trackBuffer(renderPassEncoder->cmdEncoder, indirectBuffer, (BufferUsageSnap){
+        .stage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+        .access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT
+    });
     EXIT();
 }
 void wgpuRenderPassEncoderDrawIndirect           (WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE{
@@ -8093,6 +8110,11 @@ void wgpuRenderPassEncoderDrawIndirect           (WGPURenderPassEncoder renderPa
         }
     };
     RenderPassEncoder_PushCommand(renderPassEncoder, &insert);
+
+    ce_trackBuffer(renderPassEncoder->cmdEncoder, indirectBuffer, (BufferUsageSnap){
+        .stage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+        .access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT
+    });
     EXIT();
 }
 void wgpuRenderPassEncoderSetBlendConstant       (WGPURenderPassEncoder renderPassEncoder, const WGPUColor* color) WGPU_FUNCTION_ATTRIBUTE{
@@ -11669,7 +11691,7 @@ WGPURayTracingAccelerationContainer wgpuDeviceCreateRayTracingAccelerationContai
 
         WGPUBufferDescriptor vfbDesc = {
             .size = descriptor->instanceCount * sizeof(VkAccelerationStructureInstanceKHR),
-            .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress,
+            .usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst,
         };
 
         ret->instanceBuffer = wgpuDeviceCreateBuffer(device, &vfbDesc);
