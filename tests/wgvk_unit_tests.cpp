@@ -6461,6 +6461,88 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
     free(qs);
 }
 
+namespace {
+
+struct MinimalRaytracingPipeline {
+    WGPUShaderModule raygen;
+    WGPUPipelineLayout layout;
+    WGPURaytracingPipeline pipeline;
+};
+
+MinimalRaytracingPipeline createMinimalRaytracingPipeline(WGPUDevice device) {
+    const char* raygenCode = R"(
+        #version 460
+        #extension GL_EXT_ray_tracing : require
+        void main() {}
+    )";
+    WGPUShaderModule raygen = compileGLSL(device, WGPUShaderStage_RayGen, raygenCode);
+
+    WGPURayTracingShaderBindingTableStageDescriptor stage = { WGPUShaderStage_RayGen, raygen };
+    WGPURayTracingShaderBindingTableGroupDescriptor group = {};
+    group.type = WGPURayTracingShaderBindingTableGroupType_General;
+    group.generalIndex = 0;
+    group.closestHitIndex = (uint32_t)-1;
+    group.anyHitIndex = (uint32_t)-1;
+    group.intersectionIndex = (uint32_t)-1;
+    WGPURayTracingShaderBindingTableDescriptor sbtDesc = {};
+    sbtDesc.stageCount = 1;
+    sbtDesc.stages = &stage;
+    sbtDesc.groupCount = 1;
+    sbtDesc.groups = &group;
+    WGPURayTracingShaderBindingTable sbt = wgpuDeviceCreateRayTracingShaderBindingTable(device, &sbtDesc);
+
+    WGPUPipelineLayoutDescriptor layoutDesc = {};
+    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(device, &layoutDesc);
+    WGPURayTracingPipelineDescriptor pipelineDesc = {};
+    pipelineDesc.layout = layout;
+    pipelineDesc.rayTracingState.shaderBindingTable = sbt;
+    WGPURaytracingPipeline pipeline = wgpuDeviceCreateRayTracingPipeline(device, &pipelineDesc);
+    return { raygen, layout, pipeline };
+}
+
+void releaseMinimalRaytracingPipeline(MinimalRaytracingPipeline minimal) {
+    wgpuRaytracingPipelineRelease(minimal.pipeline);
+    wgpuPipelineLayoutRelease(minimal.layout);
+    wgpuShaderModuleRelease(minimal.raygen);
+}
+
+}
+
+TEST_F(WebGPUTest, RaytracingPassReleasesPipelineAfterCompletion) {
+    const MinimalRaytracingPipeline minimal = createMinimalRaytracingPipeline(device);
+    const WGPURaytracingPipeline pipeline = minimal.pipeline;
+    ASSERT_NE(pipeline, nullptr);
+
+    const uint32_t preRefCount = pipeline->refCount;
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    WGPURaytracingPassEncoder pass = wgpuCommandEncoderBeginRaytracingPass(encoder, nullptr);
+    wgpuRaytracingPassEncoderSetPipeline(pass, pipeline);
+    wgpuRaytracingPassEncoderEnd(pass);
+    wgpuRaytracingPassEncoderRelease(pass);
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &commandBuffer);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(commandBuffer);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    EXPECT_EQ((uint32_t)pipeline->refCount, preRefCount)
+        << "reclaiming the command buffer must release the raytracing pipeline its pass tracked";
+
+    releaseMinimalRaytracingPipeline(minimal);
+}
+
+TEST_F(WebGPUTest, RaytracingPipelineAddRefIncrementsRefCount) {
+    const MinimalRaytracingPipeline minimal = createMinimalRaytracingPipeline(device);
+    ASSERT_NE(minimal.pipeline, nullptr);
+
+    wgpuRaytracingPipelineAddRef(minimal.pipeline);
+
+    ASSERT_EQ((uint32_t)minimal.pipeline->refCount, 2u);
+    wgpuRaytracingPipelineRelease(minimal.pipeline);
+    releaseMinimalRaytracingPipeline(minimal);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

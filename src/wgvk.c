@@ -6512,6 +6512,12 @@ void wgpuComputePipelineRelease(WGPUComputePipeline pipeline){
     EXIT();
 }
 
+void wgpuRaytracingPipelineAddRef(WGPURaytracingPipeline pipeline){
+}
+
+void wgpuRaytracingPipelineRelease(WGPURaytracingPipeline pipeline){
+}
+
 void wgpuBufferRelease(WGPUBuffer buffer) {
     ENTRY();
     if (--buffer->refCount == 0) {

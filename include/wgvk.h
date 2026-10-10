@@ -2180,6 +2180,8 @@ WGVK_EXPORT void wgpuDeviceRelease                        (WGPUDevice device);
 WGVK_EXPORT void wgpuQueueRelease                         (WGPUQueue device);
 WGVK_EXPORT void wgpuComputePassEncoderRelease            (WGPUComputePassEncoder rpenc);
 WGVK_EXPORT void wgpuComputePipelineRelease               (WGPUComputePipeline pipeline);
+WGVK_EXPORT void wgpuRaytracingPipelineAddRef             (WGPURaytracingPipeline pipeline) WGPU_FUNCTION_ATTRIBUTE;
+WGVK_EXPORT void wgpuRaytracingPipelineRelease            (WGPURaytracingPipeline pipeline) WGPU_FUNCTION_ATTRIBUTE;
 WGVK_EXPORT void wgpuRenderPipelineRelease                (WGPURenderPipeline pipeline);
 WGVK_EXPORT void wgpuBufferRelease                        (WGPUBuffer buffer);
 WGVK_EXPORT void wgpuBindGroupRelease                     (WGPUBindGroup bindGroup);
