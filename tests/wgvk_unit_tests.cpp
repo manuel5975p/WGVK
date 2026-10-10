@@ -6461,6 +6461,130 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
     free(qs);
 }
 
+namespace {
+
+struct MinimalRaytracingPipeline {
+    WGPUShaderModule raygen;
+    WGPUPipelineLayout layout;
+    WGPURaytracingPipeline pipeline;
+};
+
+WGPUShaderModule compileMinimalRaygen(WGPUDevice device) {
+    const char* raygenCode = R"(
+        #version 460
+        #extension GL_EXT_ray_tracing : require
+        void main() {}
+    )";
+    return compileGLSL(device, WGPUShaderStage_RayGen, raygenCode);
+}
+
+WGPURayTracingShaderBindingTable createMinimalShaderBindingTable(WGPUDevice device, WGPUShaderModule raygen) {
+    WGPURayTracingShaderBindingTableStageDescriptor stage = { WGPUShaderStage_RayGen, raygen };
+    WGPURayTracingShaderBindingTableGroupDescriptor group = {};
+    group.type = WGPURayTracingShaderBindingTableGroupType_General;
+    group.generalIndex = 0;
+    group.closestHitIndex = (uint32_t)-1;
+    group.anyHitIndex = (uint32_t)-1;
+    group.intersectionIndex = (uint32_t)-1;
+    WGPURayTracingShaderBindingTableDescriptor sbtDesc = {};
+    sbtDesc.stageCount = 1;
+    sbtDesc.stages = &stage;
+    sbtDesc.groupCount = 1;
+    sbtDesc.groups = &group;
+    return wgpuDeviceCreateRayTracingShaderBindingTable(device, &sbtDesc);
+}
+
+MinimalRaytracingPipeline createMinimalRaytracingPipeline(WGPUDevice device) {
+    WGPUShaderModule raygen = compileMinimalRaygen(device);
+    WGPURayTracingShaderBindingTable sbt = createMinimalShaderBindingTable(device, raygen);
+
+    WGPUPipelineLayoutDescriptor layoutDesc = {};
+    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(device, &layoutDesc);
+    WGPURayTracingPipelineDescriptor pipelineDesc = {};
+    pipelineDesc.layout = layout;
+    pipelineDesc.rayTracingState.shaderBindingTable = sbt;
+    WGPURaytracingPipeline pipeline = wgpuDeviceCreateRayTracingPipeline(device, &pipelineDesc);
+    wgpuRayTracingShaderBindingTableRelease(sbt);
+    return { raygen, layout, pipeline };
+}
+
+void releaseMinimalRaytracingPipeline(MinimalRaytracingPipeline minimal) {
+    wgpuRaytracingPipelineRelease(minimal.pipeline);
+    wgpuPipelineLayoutRelease(minimal.layout);
+    wgpuShaderModuleRelease(minimal.raygen);
+}
+
+}
+
+TEST_F(WebGPUTest, RaytracingPassReleasesPipelineAfterCompletion) {
+    const MinimalRaytracingPipeline minimal = createMinimalRaytracingPipeline(device);
+    const WGPURaytracingPipeline pipeline = minimal.pipeline;
+    ASSERT_NE(pipeline, nullptr);
+
+    const uint32_t preRefCount = pipeline->refCount;
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    WGPURaytracingPassEncoder pass = wgpuCommandEncoderBeginRaytracingPass(encoder, nullptr);
+    wgpuRaytracingPassEncoderSetPipeline(pass, pipeline);
+    wgpuRaytracingPassEncoderEnd(pass);
+    wgpuRaytracingPassEncoderRelease(pass);
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &commandBuffer);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(commandBuffer);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    EXPECT_EQ((uint32_t)pipeline->refCount, preRefCount)
+        << "reclaiming the command buffer must release the raytracing pipeline its pass tracked";
+
+    releaseMinimalRaytracingPipeline(minimal);
+}
+
+TEST_F(WebGPUTest, RaytracingPipelineAddRefIncrementsRefCount) {
+    const MinimalRaytracingPipeline minimal = createMinimalRaytracingPipeline(device);
+    ASSERT_NE(minimal.pipeline, nullptr);
+
+    wgpuRaytracingPipelineAddRef(minimal.pipeline);
+
+    ASSERT_EQ((uint32_t)minimal.pipeline->refCount, 2u);
+    wgpuRaytracingPipelineRelease(minimal.pipeline);
+    releaseMinimalRaytracingPipeline(minimal);
+}
+
+TEST_F(WebGPUTest, RayTracingShaderBindingTableAddRefIncrementsRefCount) {
+    WGPUShaderModule raygen = compileMinimalRaygen(device);
+    const uint32_t raygenRefCount = raygen->refCount;
+    WGPURayTracingShaderBindingTable sbt = createMinimalShaderBindingTable(device, raygen);
+    ASSERT_NE(sbt, nullptr);
+
+    wgpuRayTracingShaderBindingTableAddRef(sbt);
+
+    ASSERT_EQ((uint32_t)sbt->refCount, 2u);
+    EXPECT_EQ((uint32_t)raygen->refCount, raygenRefCount + 1)
+        << "the shader binding table must hold one reference to each stage's shader module";
+    wgpuRayTracingShaderBindingTableRelease(sbt);
+    wgpuRayTracingShaderBindingTableRelease(sbt);
+    wgpuShaderModuleRelease(raygen);
+}
+
+TEST_F(WebGPUTest, RayTracingShaderBindingTableReleaseDecrementsRefCount) {
+    WGPUShaderModule raygen = compileMinimalRaygen(device);
+    const uint32_t raygenRefCount = raygen->refCount;
+    WGPURayTracingShaderBindingTable sbt = createMinimalShaderBindingTable(device, raygen);
+    ASSERT_NE(sbt, nullptr);
+    sbt->refCount = 2;
+
+    wgpuRayTracingShaderBindingTableRelease(sbt);
+
+    ASSERT_EQ((uint32_t)sbt->refCount, 1u);
+    EXPECT_EQ((uint32_t)raygen->refCount, raygenRefCount + 1)
+        << "the shader binding table must keep its shader modules until its last release";
+    wgpuRayTracingShaderBindingTableRelease(sbt);
+    EXPECT_EQ((uint32_t)raygen->refCount, raygenRefCount)
+        << "the last release of the shader binding table must release its shader modules";
+    wgpuShaderModuleRelease(raygen);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

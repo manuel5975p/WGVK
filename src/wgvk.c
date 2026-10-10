@@ -6512,6 +6512,43 @@ void wgpuComputePipelineRelease(WGPUComputePipeline pipeline){
     EXIT();
 }
 
+void wgpuRaytracingPipelineAddRef(WGPURaytracingPipeline pipeline){
+    ENTRY();
+    ++pipeline->refCount;
+    EXIT();
+}
+
+void wgpuRaytracingPipelineRelease(WGPURaytracingPipeline pipeline){
+    ENTRY();
+    if(--pipeline->refCount == 0){
+        wgpuBufferRelease(pipeline->sbtBuffer);
+        wgpuPipelineLayoutRelease(pipeline->layout);
+        pipeline->device->functions.vkDestroyPipeline(pipeline->device->device, pipeline->raytracingPipeline, NULL);
+        RL_FREE(pipeline);
+    }
+    EXIT();
+}
+
+void wgpuRayTracingShaderBindingTableAddRef(WGPURayTracingShaderBindingTable shaderBindingTable){
+    ENTRY();
+    ++shaderBindingTable->refCount;
+    EXIT();
+}
+
+void wgpuRayTracingShaderBindingTableRelease(WGPURayTracingShaderBindingTable shaderBindingTable){
+    ENTRY();
+    if(--shaderBindingTable->refCount == 0){
+        for(uint32_t i = 0;i < shaderBindingTable->shaderStageCount;i++){
+            wgpuShaderModuleRelease(shaderBindingTable->shaderModules[i]);
+        }
+        RL_FREE(shaderBindingTable->shaderModules);
+        RL_FREE(shaderBindingTable->shaderGroups);
+        RL_FREE(shaderBindingTable->shaderStages);
+        RL_FREE(shaderBindingTable);
+    }
+    EXIT();
+}
+
 void wgpuBufferRelease(WGPUBuffer buffer) {
     ENTRY();
     if (--buffer->refCount == 0) {
@@ -7616,6 +7653,7 @@ WGPURaytracingPassEncoder wgpuCommandEncoderBeginRaytracingPass(WGPUCommandEncod
     WGPURaytracingPassEncoder rtenc = RL_CALLOC(1, sizeof(WGPURaytracingPassEncoderImpl));
     rtenc->device = enc->device;
     rtenc->refCount = 2;
+    WGPURaytracingPassEncoderSet_add(&enc->referencedRTs, rtenc);
     RenderPassCommandGenericVector_init(&rtenc->bufferedCommands);
     rtenc->cmdEncoder = enc;
     rtenc->cmdBuffer = enc->buffer;
@@ -8543,6 +8581,9 @@ static inline void samplerReleaseCallback(WGPUSampler sampler, void* unused){
 }
 static inline void computePipelineReleaseCallback(WGPUComputePipeline computePipeline, void* unused){
     wgpuComputePipelineRelease(computePipeline);
+}
+static inline void raytracingPipelineReleaseCallback(WGPURaytracingPipeline raytracingPipeline, void* unused){
+    wgpuRaytracingPipelineRelease(raytracingPipeline);
 }
 static inline void renderPipelineReleaseCallback(WGPURenderPipeline renderPipeline, void* unused){
     wgpuRenderPipelineRelease(renderPipeline);
@@ -11393,6 +11434,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     BindGroupLayoutUsageSet_for_each(&resourceUsage->referencedBindGroupLayouts, bindGroupLayoutReleaseCallback, NULL);
     SamplerUsageSet_for_each(&resourceUsage->referencedSamplers, samplerReleaseCallback, NULL);
     ComputePipelineUsageSet_for_each(&resourceUsage->referencedComputePipelines, computePipelineReleaseCallback, NULL);
+    RaytracingPipelineUsageSet_for_each(&resourceUsage->referencedRaytracingPipelines, raytracingPipelineReleaseCallback, NULL);
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
@@ -11404,6 +11446,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     BindGroupLayoutUsageSet_free(&resourceUsage->referencedBindGroupLayouts);
     SamplerUsageSet_free(&resourceUsage->referencedSamplers);
     ComputePipelineUsageSet_free(&resourceUsage->referencedComputePipelines);
+    RaytracingPipelineUsageSet_free(&resourceUsage->referencedRaytracingPipelines);
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
@@ -11487,7 +11530,10 @@ WGPURayTracingShaderBindingTable wgpuDeviceCreateRayTracingShaderBindingTable(WG
     }
     ret->shaderStageCount = descriptor->stageCount;
     ret->shaderStages = RL_CALLOC(descriptor->stageCount, sizeof(VkPipelineShaderStageCreateInfo));
+    ret->shaderModules = RL_CALLOC(descriptor->stageCount, sizeof(WGPUShaderModule));
     for(uint32_t i = 0;i < descriptor->stageCount;i++){
+        ret->shaderModules[i] = descriptor->stages[i].module;
+        wgpuShaderModuleAddRef(ret->shaderModules[i]);
         VkShaderModule vkModule = VK_NULL_HANDLE;
         if(descriptor->stages[i].module->vulkanModuleMultiEP){
             vkModule = descriptor->stages[i].module->vulkanModuleMultiEP;
@@ -11516,6 +11562,8 @@ static inline uint32_t roundup_to_multiple(uint32_t x, uint32_t multipleOf){
 WGPURaytracingPipeline wgpuDeviceCreateRayTracingPipeline(WGPUDevice device, const WGPURayTracingPipelineDescriptor* descriptor){
     ENTRY();
     WGPURaytracingPipeline ret = RL_CALLOC(1, sizeof(WGPURaytracingPipelineImpl));
+    ret->device = device;
+    ret->refCount = 1;
     ret->layout = descriptor->layout;
     wgpuPipelineLayoutAddRef(ret->layout);
 
