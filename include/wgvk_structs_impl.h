@@ -36,11 +36,11 @@
         #define CLITERAL(X) (X)
     #endif
 #endif
-#if defined(_MSC_VER) || defined(_MSC_FULL_VER) 
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
     #define rg_unreachable(...) __assume(false)
     #define rg_assume(Condition) __assume(Condition)
     #define rg_trap(...) __debugbreak()
-#else 
+#else
     #define rg_unreachable(...) __builtin_unreachable()
     #define rg_assume(Condition) __builtin_assume(Condition)
     #define rg_trap(...) __builtin_trap()
@@ -1672,7 +1672,7 @@ DEFINE_PTR_HASH_SET (CONTAINERAPI, RenderBundleUsageSet, WGPURenderBundle)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, QuerySetUsageSet, WGPUQuerySet)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPUComputePassEncoderSet, WGPUComputePassEncoder)
 DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURaytracingPassEncoderSet, WGPURaytracingPassEncoder)
-DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURayTracingAccelerationContainerSet, WGPURayTracingAccelerationContainer)
+DEFINE_PTR_HASH_SET (CONTAINERAPI, WGPURayTracingAccelerationContainerUsageSet, WGPURayTracingAccelerationContainer)
 
 DEFINE_VECTOR (static inline, VkDynamicState, VkDynamicStateVector)
 DEFINE_VECTOR (CONTAINERAPI, VkWriteDescriptorSet, VkWriteDescriptorSetVector)
@@ -1731,7 +1731,7 @@ typedef struct ResourceUsage{
     RaytracingPipelineUsageSet referencedRaytracingPipelines;
     RenderBundleUsageSet referencedRenderBundles;
     QuerySetUsageSet referencedQuerySets;
-    WGPURayTracingAccelerationContainerSet referencedAccelerationStructures;
+    WGPURayTracingAccelerationContainerUsageSet referencedAccelerationStructures;
     //LayoutAssumptions entryAndFinalLayouts;
 }ResourceUsage;
 
@@ -1744,6 +1744,7 @@ static inline void ResourceUsage_free(ResourceUsage* ru){
     SamplerUsageSet_free(&ru->referencedSamplers);
     QuerySetUsageSet_free(&ru->referencedQuerySets);
     RenderBundleUsageSet_free(&ru->referencedRenderBundles);
+    WGPURayTracingAccelerationContainerUsageSet_free(&ru->referencedAccelerationStructures);
 }
 
 static inline void ResourceUsage_move(ResourceUsage* dest, ResourceUsage* source){
@@ -1753,6 +1754,7 @@ static inline void ResourceUsage_move(ResourceUsage* dest, ResourceUsage* source
     BindGroupUsageSet_move(&dest->referencedBindGroups, &source->referencedBindGroups);
     BindGroupLayoutUsageSet_move(&dest->referencedBindGroupLayouts, &source->referencedBindGroupLayouts);
     SamplerUsageSet_move(&dest->referencedSamplers, &source->referencedSamplers);
+    WGPURayTracingAccelerationContainerUsageSet_move(&dest->referencedAccelerationStructures, &source->referencedAccelerationStructures);
     QuerySetUsageSet_free(&dest->referencedQuerySets);
     RenderBundleUsageSet_free(&dest->referencedRenderBundles);
     //LayoutAssumptions_move(&dest->entryAndFinalLayouts, &source->entryAndFinalLayouts);
@@ -1767,6 +1769,7 @@ static inline void ResourceUsage_init(ResourceUsage* ru){
     SamplerUsageSet_init(&ru->referencedSamplers);
     RenderBundleUsageSet_init(&ru->referencedRenderBundles);
     QuerySetUsageSet_init(&ru->referencedQuerySets);
+    WGPURayTracingAccelerationContainerUsageSet_init(&ru->referencedAccelerationStructures);
     //LayoutAssumptions_init(&ru->entryAndFinalLayouts);
 }
 
@@ -1801,7 +1804,7 @@ typedef struct SyncState{
     VkSemaphore acquireImageSemaphore;
     bool acquireImageSemaphoreSignalled;
     uint32_t submits;
-    //VkFence renderFinishedFence;    
+    //VkFence renderFinishedFence;
 }SyncState;
 typedef struct WGPUString{
     char* data;
@@ -1965,7 +1968,7 @@ typedef struct PerframeCache{
 
     WGPUBufferVector unusedBatchBuffers;
     WGPUBufferVector usedBatchBuffers;
-    
+
     VkCommandBuffer finalTransitionBuffer;
     VkSemaphore finalTransitionSemaphore;
     WGPUFence finalTransitionFence;
@@ -2018,7 +2021,7 @@ typedef struct WorkDoneFutureState {
 
 typedef struct WGPUFenceImpl {
     VkFence fence;
-    Atomar(WGPUFenceState) state; 
+    Atomar(WGPUFenceState) state;
     WGPUDevice device;
     refcount_type refCount;
     CallbackWithUserdataVector callbacksOnWaitComplete;
@@ -2120,7 +2123,7 @@ typedef struct WGPURayTracingAccelerationContainerImpl{
 /*typedef struct WGPUBottomLevelAccelerationStructureImpl {
     WGPUDevice device;
     VkAccelerationStructureKHR accelerationStructure;
-    
+
     WGPUBuffer scratchBuffer;
     WGPUBuffer accelerationStructureBuffer;
 } WGPUBottomLevelAccelerationStructureImpl;
@@ -2276,9 +2279,9 @@ static inline void FenceCache_Init(WGPUDevice device, FenceCache* ptr){
 /**
  * @brief Registers commandBuffers to depend on fence and be released when fence is waited for
  * @details Takes ownership of the commandBuffers vector data. commandBuffers does not have to be externally freed after this
- * @param pfcache 
- * @param fence 
- * @param commandBuffers 
+ * @param pfcache
+ * @param fence
+ * @param commandBuffers
  */
 void PerframeCache_pushFenceDependencies(PerframeCache* pfcache, WGPUFence fence, WGPUCommandBufferVector* commandBuffers);
 WGPUStatus FIFCache_init(FIFCache* fifCache, WGPUDevice device, uint32_t queueFamily);
@@ -2291,7 +2294,7 @@ static inline VkFence FenceCache_GetFence(FenceCache* ptr){
         VkFence ret = NULL;
         VkFenceCreateInfo createInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         VkResult result = ptr->device->functions.vkCreateFence(
-            ptr->device->device, 
+            ptr->device->device,
             &createInfo,
             NULL,
             &ret
@@ -2498,7 +2501,7 @@ typedef struct WGPURenderPassEncoderImpl{
 
     RenderPassCommandBegin beginInfo;
     RenderPassCommandGenericVector bufferedCommands;
-    
+
     WGPUDevice device;
     ResourceUsage resourceUsage;
     refcount_type refCount;
@@ -2538,7 +2541,7 @@ static inline size_t hashDynamicState(DefaultDynamicState dst){
     return ret ^ ((size_t)accum);
 }
 static inline size_t cmpDynamicState(DefaultDynamicState a, DefaultDynamicState b){
-    return 
+    return
     a.viewport.x == b.viewport.x &&
     a.viewport.y == b.viewport.y &&
     a.viewport.width == b.viewport.width &&
@@ -2562,7 +2565,7 @@ typedef struct WGPURenderBundleImpl{
     DynamicStateCommandBufferMap encodedCommandBuffers;
     WGPUDevice device;
     refcount_type refCount;
-    
+
     VkFormat* colorAttachmentFormats;
     uint32_t colorAttachmentCount;
     VkFormat depthFormat;
@@ -2597,8 +2600,8 @@ typedef struct WGPUCommandEncoderImpl{
     WGPUDevice device;
     uint32_t cacheIndex;
     uint32_t movedFrom;
-    
-    
+
+
 }WGPUCommandEncoderImpl;
 typedef struct WGPUCommandBufferImpl{
     VkCommandBuffer buffer;
@@ -2606,7 +2609,7 @@ typedef struct WGPUCommandBufferImpl{
     WGPURenderPassEncoderSet referencedRPs;
     WGPUComputePassEncoderSet referencedCPs;
     WGPURaytracingPassEncoderSet referencedRTs;
-    
+
     ResourceUsage resourceUsage;
     WGPUString label;
     WGPUDevice device;
@@ -2639,7 +2642,7 @@ typedef enum SurfaceImplType{
 }SurfaceImplType;
 
 typedef struct WGPUSurfaceImpl{
-    
+
     VkSurfaceKHR surface;
     refcount_type refCount;
     WGPUDevice device;
@@ -2673,12 +2676,12 @@ typedef struct WGPUQueueImpl{
     VkQueue presentQueue;
     refcount_type refCount;
 
-    
+
     WGPUDevice device;
 
     WGPUCommandEncoder presubmitCache;
 
-    
+
 }WGPUQueueImpl;
 
 
@@ -2900,7 +2903,7 @@ char* sw_sprintf(const char* format, ...);
         } \
     } while (0)
 
-    
+
 
 
 #else // WGPU_VALIDATION_ENABLED not defined
@@ -2930,7 +2933,7 @@ static inline VkQueryType toVulkanQueryType(WGPUQueryType type){
     }
 }
 static inline bool isDepthFormat(WGPUTextureFormat format){
-    return 
+    return
     format == WGPUTextureFormat_Depth16Unorm ||
     format == WGPUTextureFormat_Depth24Plus ||
     format == WGPUTextureFormat_Depth24PlusStencil8 ||
@@ -2941,7 +2944,7 @@ static inline VkAccelerationStructureTypeKHR toVulkanAccelerationStructureLevel(
     return (level == WGPURayTracingAccelerationContainerLevel_Top) ? VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR : VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
 }
 static inline bool isDepthStencilFormat(WGPUTextureFormat format){
-    return 
+    return
     format == WGPUTextureFormat_Depth24PlusStencil8 ||
     format == WGPUTextureFormat_Depth32FloatStencil8;
 }
@@ -3101,31 +3104,31 @@ static inline VkImageAspectFlags toVulkanAspectMaskVk(WGPUTextureAspect aspect, 
 // Inverse conversion: Vulkan usage flags -> WGPUTextureUsage flags
 static inline WGPUTextureUsage fromVulkanWGPUTextureUsage(VkImageUsageFlags vkUsage) {
     WGPUTextureUsage usage = 0;
-    
+
     // Map transfer bits
     if (vkUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
         usage |= WGPUTextureUsage_CopySrc;
     if (vkUsage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)
         usage |= WGPUTextureUsage_CopyDst;
-    
+
     // Map sampling bit
     if (vkUsage & VK_IMAGE_USAGE_SAMPLED_BIT)
         usage |= WGPUTextureUsage_TextureBinding;
-    
+
     // Map storage bit (ambiguous: could originate from either storage flag)
     if (vkUsage & VK_IMAGE_USAGE_STORAGE_BIT)
         usage |= WGPUTextureUsage_StorageBinding | WGPUTextureUsage_StorageAttachment;
-    
+
     // Map render attachment bits (depth/stencil or color, both yield RenderAttachment)
     if (vkUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
         usage |= WGPUTextureUsage_RenderAttachment;
     if (vkUsage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
         usage |= WGPUTextureUsage_RenderAttachment;
-    
+
     // Map transient attachment
     if (vkUsage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)
         usage |= WGPUTextureUsage_TransientAttachment;
-    
+
     return usage;
 }
 
@@ -3449,7 +3452,7 @@ static inline VkSamplerAddressMode toVulkanAddressMode(WGPUAddressMode mode){
         case WGPUAddressMode_Force32:
         default:
         rg_unreachable();
-        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; 
+        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     }
 }
 
@@ -3576,7 +3579,7 @@ static inline VkAttachmentStoreOp toVulkanStoreOperation(WGPUStoreOp lop) {
     case WGPUStoreOp_Discard:
         return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     case WGPUStoreOp_Undefined:
-    
+
         return VK_ATTACHMENT_STORE_OP_DONT_CARE; // Example fallback
     default:
         return VK_ATTACHMENT_STORE_OP_DONT_CARE; // Default fallback
@@ -3825,15 +3828,15 @@ static inline VkFormat toVulkanVertexFormat(WGPUVertexFormat vf) {
 //    switch (type) {
 //        case storage_texture2d:       [[fallthrough]];
 //        case storage_texture2d_array: [[fallthrough]];
-//        case storage_texture3d: 
+//        case storage_texture3d:
 //            return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-//        
+//
 //        case storage_buffer:
 //            return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 //        case uniform_buffer:
 //            return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 //
-//        
+//
 //        case texture2d:       [[fallthrough]];
 //        case texture2d_array: [[fallthrough]];
 //        case texture3d:
@@ -3861,7 +3864,7 @@ static inline VkVertexInputRate toVulkanVertexStepMode(WGPUVertexStepMode vsm) {
         return VK_VERTEX_INPUT_RATE_VERTEX;
     case WGPUVertexStepMode_Instance:
         return VK_VERTEX_INPUT_RATE_INSTANCE;
-    
+
     case WGPUVertexStepMode_Undefined: //fallthrough
     default:
         return VK_VERTEX_INPUT_RATE_MAX_ENUM; // Default fallback
