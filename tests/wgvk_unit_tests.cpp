@@ -6464,7 +6464,7 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
 TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
     float aabb[6] = { 0,0,0, 1,1,1 };
     WGPUBufferDescriptor aabbDesc = {};
-    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst;
     aabbDesc.size = sizeof(aabb);
     WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
     ASSERT_NE(aabbBuffer, nullptr);
@@ -6543,7 +6543,7 @@ TEST_F(WebGPUTest, BindGroupReleasesAccelerationStructure) {
 TEST_F(WebGPUTest, AccelerationStructureBuildHoldsReference) {
     float aabb[6] = { 0,0,0, 1,1,1 };
     WGPUBufferDescriptor aabbDesc = {};
-    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst;
     aabbDesc.size = sizeof(aabb);
     WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
     ASSERT_NE(aabbBuffer, nullptr);
@@ -6582,7 +6582,7 @@ TEST_F(WebGPUTest, AccelerationStructureBuildHoldsReference) {
 TEST_F(WebGPUTest, AccelerationStructureBuildReferenceReleasedAfterTick) {
     float aabb[6] = { 0,0,0, 1,1,1 };
     WGPUBufferDescriptor aabbDesc = {};
-    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress;
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst;
     aabbDesc.size = sizeof(aabb);
     WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
     ASSERT_NE(aabbBuffer, nullptr);
