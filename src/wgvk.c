@@ -3187,18 +3187,19 @@ WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescript
     WGPUTexture ret = RL_CALLOC(1, sizeof(WGPUTextureImpl));
     ret->usage = toVulkanTextureUsage(descriptor->usage, descriptor->format);
     ret->dimension = toVulkanTextureDimension(descriptor->dimension);
+    const bool is3D = descriptor->dimension == WGPUTextureDimension_3D;
     VkImageCreateInfo imageInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = NULL,
         .flags = 0,
-        .imageType = VK_IMAGE_TYPE_2D,
+        .imageType = is3D ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
         .extent = {
             .width = descriptor->size.width,
             .height = descriptor->size.height,
-            .depth = 1
+            .depth = is3D ? descriptor->size.depthOrArrayLayers : 1
         },
         .mipLevels = descriptor->mipLevelCount,
-        .arrayLayers = descriptor->size.depthOrArrayLayers,
+        .arrayLayers = is3D ? 1 : descriptor->size.depthOrArrayLayers,
         .format = toVulkanPixelFormat(descriptor->format),
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
@@ -4152,7 +4153,7 @@ WGPUTextureView wgpuTextureCreateView(WGPUTexture texture, const WGPUTextureView
             .baseMipLevel = 0,
             .mipLevelCount = texture->mipLevels,
             .baseArrayLayer = 0,
-            .arrayLayerCount = texture->depthOrArrayLayers,
+            .arrayLayerCount = texture->dimension == VK_IMAGE_TYPE_3D ? 1 : texture->depthOrArrayLayers,
             .aspect = WGPUTextureAspect_All,
             .usage = texture->usage
         };
