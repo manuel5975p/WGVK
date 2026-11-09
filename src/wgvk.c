@@ -4920,7 +4920,44 @@ WGPUCommandBuffer wgpuCommandEncoderFinish(WGPUCommandEncoder commandEncoder, co
     EXIT();
 }
 
-void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo){
+typedef struct RaytracingSbtRegions{
+    VkStridedDeviceAddressRegionKHR raygen;
+    VkStridedDeviceAddressRegionKHR miss;
+    VkStridedDeviceAddressRegionKHR hit;
+    VkStridedDeviceAddressRegionKHR callable;
+}RaytracingSbtRegions;
+
+static RaytracingSbtRegions raytracingSbtRegions(WGPUDevice device, WGPURaytracingPipeline pipeline, uint32_t rayGenerationOffset, uint32_t rayMissOffset, uint32_t rayHitOffset){
+    wgvk_assert(pipeline != NULL, "Tracing rays without a bound ray tracing pipeline.");
+    wgvk_assert(pipeline->sbtBuffer != NULL, "Ray tracing pipeline does not have a valid SBT buffer.");
+
+    const VkPhysicalDeviceRayTracingPipelinePropertiesKHR* rtProperties = &device->adapter->rayTracingPipelineProperties;
+    const uint32_t handleSize = rtProperties->shaderGroupHandleSize;
+    const uint32_t handleAlignment = rtProperties->shaderGroupBaseAlignment;
+    const VkDeviceSize handleStride = (handleSize + (handleAlignment - 1)) & ~(handleAlignment - 1);
+    const VkDeviceAddress sbtBaseAddress = pipeline->sbtBuffer->address;
+
+    return (RaytracingSbtRegions){
+        .raygen = {
+            .deviceAddress = sbtBaseAddress + rayGenerationOffset * handleStride,
+            .stride        = handleStride,
+            .size          = handleStride
+        },
+        .miss = {
+            .deviceAddress = sbtBaseAddress + rayMissOffset * handleStride,
+            .stride        = handleStride,
+            .size          = handleStride
+        },
+        .hit = {
+            .deviceAddress = sbtBaseAddress + rayHitOffset * handleStride,
+            .stride        = handleStride,
+            .size          = handleStride
+        },
+        .callable = { .deviceAddress = 0, .stride = 0, .size = 0 }
+    };
+}
+
+void recordVkCommand(CommandBufferAndSomeState* destination_,const RenderPassCommandGeneric* command, const RenderPassCommandBegin *beginInfo){
     VkCommandBuffer destinationVk = destination_->buffer;
     WGPUDevice device = destination_->device;
     switch(command->type){
@@ -5088,66 +5125,36 @@ void recordVkCommand(CommandBufferAndSomeState* destination_, const RenderPassCo
         break;
         case rt_command_type_trace_rays: {
             const RaytracingPassCommandTraceRays* traceRays = &command->traceRays;
-
-            WGPURaytracingPipeline pipeline = destination_->lastRaytracingPipeline;
-            wgvk_assert(pipeline != NULL, "vkCmdTraceRaysKHR called without a bound ray tracing pipeline.");
-
-            WGPUBuffer sbtBuffer = pipeline->sbtBuffer;
-            VkDeviceSize totalSbtSize = pipeline->totalSbtSize;
-            wgvk_assert(sbtBuffer != NULL, "Ray tracing pipeline does not have a valid SBT buffer.");
-
-            // Get properties to calculate the stride between handles.
-            const VkPhysicalDeviceRayTracingPipelinePropertiesKHR* rtProperties = &device->adapter->rayTracingPipelineProperties;
-            const uint32_t handleSize = rtProperties->shaderGroupHandleSize;
-            const uint32_t handleAlignment = rtProperties->shaderGroupBaseAlignment;
-
-            // handleStride is usually 32
-            const VkDeviceSize handleStride = (handleSize + (handleAlignment - 1)) & ~(handleAlignment - 1);
-
-            const VkDeviceAddress sbtBaseAddress = sbtBuffer->address;
-
-            char groupDump_[32 * 3] = {0};
-            void* groupDump = groupDump_;
-            device->functions.vkGetRayTracingShaderGroupHandlesKHR(device->device, pipeline->raytracingPipeline, 0, 3, (size_t)32 * 3, groupDump);
-
-            VkDeviceSize rayGenRegionSize = traceRays->rayMissOffset - traceRays->rayGenerationOffset;
-            VkDeviceSize missRegionSize = traceRays->rayHitOffset - traceRays->rayMissOffset;
-            VkDeviceSize hitRegionSize = totalSbtSize - traceRays->rayHitOffset;
-            (void)rayGenRegionSize;
-            (void)missRegionSize;
-            (void)hitRegionSize;
-
-
-
-            const VkStridedDeviceAddressRegionKHR raygenSbtRegion = {
-                .deviceAddress = sbtBaseAddress + traceRays->rayGenerationOffset * handleStride,
-                .stride        = handleStride,
-                .size          = handleStride
-            };
-
-            const VkStridedDeviceAddressRegionKHR missSbtRegion = {
-                .deviceAddress = sbtBaseAddress + traceRays->rayMissOffset * handleStride,
-                .stride        = handleStride,
-                .size          = handleStride
-            };
-
-            const VkStridedDeviceAddressRegionKHR hitSbtRegion = {
-                .deviceAddress = sbtBaseAddress + traceRays->rayHitOffset * handleStride,
-                .stride        = handleStride,
-                .size          = handleStride
-            };
-
-            const VkStridedDeviceAddressRegionKHR callableSbtRegion = { .deviceAddress = 0, .stride = 0, .size = 0 };
+            const RaytracingSbtRegions regions = raytracingSbtRegions(device, destination_->lastRaytracingPipeline, traceRays->rayGenerationOffset, traceRays->rayMissOffset, traceRays->rayHitOffset);
 
             device->functions.vkCmdTraceRaysKHR(
                 destinationVk,
-                &raygenSbtRegion,
-                &missSbtRegion,
-                &hitSbtRegion,
-                &callableSbtRegion,
+                &regions.raygen,
+                &regions.miss,
+                &regions.hit,
+                &regions.callable,
                 traceRays->width,
                 traceRays->height,
                 traceRays->depth
+            );
+        }
+        break;
+        case rt_command_type_trace_rays_indirect: {
+            const RaytracingPassCommandTraceRaysIndirect* traceRaysIndirect = &command->traceRaysIndirect;
+            const RaytracingSbtRegions regions = raytracingSbtRegions(device, destination_->lastRaytracingPipeline, traceRaysIndirect->rayGenerationOffset, traceRaysIndirect->rayMissOffset, traceRaysIndirect->rayHitOffset);
+
+            ce_trackBuffer(destination_->cmdEncoder, traceRaysIndirect->indirectBuffer, (BufferUsageSnap){
+                .access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                .stage  = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
+            });
+
+            device->functions.vkCmdTraceRaysIndirectKHR(
+                destinationVk,
+                &regions.raygen,
+                &regions.miss,
+                &regions.hit,
+                &regions.callable,
+                traceRaysIndirect->indirectBuffer->address + traceRaysIndirect->indirectOffset
             );
         }
         break;
@@ -11945,6 +11952,33 @@ void wgpuRaytracingPassEncoderTraceRays       (WGPURaytracingPassEncoder cpe, ui
             .width = width,
             .height = height,
             .depth = depth,
+        }
+    };
+    RaytracingPassEncoder_PushCommand(cpe, &command);
+    EXIT();
+}
+
+void wgpuRaytracingPassEncoderTraceRaysIndirect(WGPURaytracingPassEncoder cpe, uint32_t rayGenerationOffset, uint32_t rayHitOffset, uint32_t rayMissOffset, WGPUBuffer indirectBuffer, uint64_t indirectOffset){
+    ENTRY();
+    const WGPUBufferUsage requiredUsage = WGPUBufferUsage_Indirect | WGPUBufferUsage_ShaderDeviceAddress;
+    if((indirectBuffer->usage & requiredUsage) != requiredUsage){
+        DeviceCallback(cpe->device, WGPUErrorType_Validation, STRVIEW("TraceRaysIndirect requires an indirect buffer with WGPUBufferUsage_Indirect and WGPUBufferUsage_ShaderDeviceAddress"));
+        EXIT();
+        return;
+    }
+    if(indirectOffset % 4 != 0){
+        DeviceCallback(cpe->device, WGPUErrorType_Validation, STRVIEW("TraceRaysIndirect requires indirectOffset to be a multiple of 4"));
+        EXIT();
+        return;
+    }
+    RenderPassCommandGeneric command = {
+        .type = rt_command_type_trace_rays_indirect,
+        .traceRaysIndirect = {
+            .rayGenerationOffset = rayGenerationOffset,
+            .rayHitOffset = rayHitOffset,
+            .rayMissOffset = rayMissOffset,
+            .indirectBuffer = indirectBuffer,
+            .indirectOffset = indirectOffset,
         }
     };
     RaytracingPassEncoder_PushCommand(cpe, &command);
