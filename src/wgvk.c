@@ -8270,7 +8270,7 @@ RGAPI void ru_trackSampler         (ResourceUsage* resourceUsage, WGPUSampler sa
 }
 
 RGAPI void ru_trackAccelerationStructure(ResourceUsage* resourceUsage, WGPURayTracingAccelerationContainer accelerationStructure){
-    if(WGPURayTracingAccelerationContainerSet_add(&resourceUsage->referencedAccelerationStructures, accelerationStructure)){
+    if(WGPURayTracingAccelerationContainerUsageSet_add(&resourceUsage->referencedAccelerationStructures, accelerationStructure)){
         ++accelerationStructure->refCount;
     }
 }
@@ -8552,6 +8552,9 @@ static inline void renderBundleReleaseCallback(WGPURenderBundle renderPipeline, 
 }
 static inline void querySetReleaseCallback(WGPUQuerySet renderPipeline, void* unused){
     wgpuQuerySetRelease(renderPipeline);
+}
+static inline void accelerationStructureReleaseCallback(WGPURayTracingAccelerationContainer as, void* unused){
+    wgpuRayTracingAccelerationContainerRelease(as);
 }
 
 
@@ -11396,6 +11399,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_for_each(&resourceUsage->referencedRenderPipelines, renderPipelineReleaseCallback, NULL);
     RenderBundleUsageSet_for_each(&resourceUsage->referencedRenderBundles, renderBundleReleaseCallback, NULL);
     QuerySetUsageSet_for_each(&resourceUsage->referencedQuerySets, querySetReleaseCallback, NULL);
+    WGPURayTracingAccelerationContainerUsageSet_for_each(&resourceUsage->referencedAccelerationStructures, accelerationStructureReleaseCallback, NULL);
 
     BufferUsageRecordMap_free(&resourceUsage->referencedBuffers);
     ImageUsageRecordMap_free(&resourceUsage->referencedTextures);
@@ -11407,6 +11411,7 @@ RGAPI void releaseAllAndClear(ResourceUsage* resourceUsage){
     RenderPipelineUsageSet_free(&resourceUsage->referencedRenderPipelines);
     RenderBundleUsageSet_free(&resourceUsage->referencedRenderBundles);
     QuerySetUsageSet_free(&resourceUsage->referencedQuerySets);
+    WGPURayTracingAccelerationContainerUsageSet_free(&resourceUsage->referencedAccelerationStructures);
 }
 
 
@@ -11791,6 +11796,8 @@ void wgpuCommandEncoderBuildRayTracingAccelerationContainer(WGPUCommandEncoder e
     ENTRY();
 
     WGPUDevice device = encoder->device;
+
+    ru_trackAccelerationStructure(&encoder->resourceUsage, container);
 
     if(container->level == WGPURayTracingAccelerationContainerLevel_Top){
         if (container->instanceBuffer) {
