@@ -6461,6 +6461,87 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
     free(qs);
 }
 
+struct AabbBlas {
+    WGPUBuffer staging;
+    WGPUBuffer aabbBuffer;
+    WGPURayTracingAccelerationContainer blas;
+};
+
+static const uint64_t aabbBlasDataSize = 6 * sizeof(float);
+
+static AabbBlas createAabbBlasWithStagedData(WGPUDevice device) {
+    float aabb[6] = { 0,0,0, 1,1,1 };
+    WGPUBufferDescriptor stagingDesc = {};
+    stagingDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_MapWrite;
+    stagingDesc.size = sizeof(aabb);
+    stagingDesc.mappedAtCreation = true;
+    WGPUBuffer staging = wgpuDeviceCreateBuffer(device, &stagingDesc);
+    memcpy(wgpuBufferGetMappedRange(staging, 0, sizeof(aabb)), aabb, sizeof(aabb));
+    wgpuBufferUnmap(staging);
+
+    WGPUBufferDescriptor aabbDesc = {};
+    aabbDesc.usage = WGPUBufferUsage_Raytracing | WGPUBufferUsage_ShaderDeviceAddress | WGPUBufferUsage_CopyDst;
+    aabbDesc.size = sizeof(aabb);
+    WGPUBuffer aabbBuffer = wgpuDeviceCreateBuffer(device, &aabbDesc);
+
+    WGPURayTracingAccelerationGeometryDescriptor geom = {};
+    geom.type = WGPURayTracingAccelerationGeometryType_AABBs;
+    geom.aabb.buffer = aabbBuffer;
+    geom.aabb.count = 1;
+    geom.aabb.stride = sizeof(aabb);
+    WGPURayTracingAccelerationContainerDescriptor blasDesc = {};
+    blasDesc.level = WGPURayTracingAccelerationContainerLevel_Bottom;
+    blasDesc.geometryCount = 1;
+    blasDesc.geometries = &geom;
+    WGPURayTracingAccelerationContainer blas = wgpuDeviceCreateRayTracingAccelerationContainer(device, &blasDesc);
+
+    return { staging, aabbBuffer, blas };
+}
+
+static void releaseAabbBlas(AabbBlas& resources) {
+    wgpuRayTracingAccelerationContainerRelease(resources.blas);
+    wgpuBufferRelease(resources.aabbBuffer);
+    wgpuBufferRelease(resources.staging);
+}
+
+TEST_F(WebGPUTest, AccelerationStructureBuild_AfterCopyInSameEncoder) {
+    AabbBlas resources = createAabbBlasWithStagedData(device);
+    ASSERT_NE(resources.blas, nullptr);
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, resources.staging, 0, resources.aabbBuffer, 0, aabbBlasDataSize);
+    wgpuCommandEncoderBuildRayTracingAccelerationContainer(encoder, resources.blas);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(cmd);
+
+    wgpuQueueWaitIdle(queue);
+    releaseAabbBlas(resources);
+}
+
+TEST_F(WebGPUTest, AccelerationStructureBuild_AfterCopyInEarlierCommandBufferOfSameSubmit) {
+    AabbBlas resources = createAabbBlasWithStagedData(device);
+    ASSERT_NE(resources.blas, nullptr);
+
+    WGPUCommandEncoder copyEncoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(copyEncoder, resources.staging, 0, resources.aabbBuffer, 0, aabbBlasDataSize);
+    WGPUCommandEncoder buildEncoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderBuildRayTracingAccelerationContainer(buildEncoder, resources.blas);
+    WGPUCommandBuffer cmds[2] = {
+        wgpuCommandEncoderFinish(copyEncoder, nullptr),
+        wgpuCommandEncoderFinish(buildEncoder, nullptr),
+    };
+    wgpuQueueSubmit(queue, 2, cmds);
+    wgpuCommandEncoderRelease(copyEncoder);
+    wgpuCommandEncoderRelease(buildEncoder);
+    wgpuCommandBufferRelease(cmds[0]);
+    wgpuCommandBufferRelease(cmds[1]);
+
+    wgpuQueueWaitIdle(queue);
+    releaseAabbBlas(resources);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
