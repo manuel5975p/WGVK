@@ -2989,6 +2989,77 @@ TEST_F(WebGPUTest, CopyBufferToTexture_RGBA8) {
     wgpuTextureRelease(texture);
 }
 
+TEST_F(WebGPUTest, Texture3DSlicesRoundTrip) {
+    const uint8_t texels[2][4] = {{1, 2, 3, 4}, {5, 6, 7, 8}};
+    const uint32_t bytesPerRow = 256;
+    const size_t readSize = bytesPerRow * 2;
+
+    WGPUTextureDescriptor texDesc = {};
+    texDesc.size = {1, 1, 2};
+    texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc;
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount = 1;
+    texDesc.dimension = WGPUTextureDimension_3D;
+    WGPUTexture texture = wgpuDeviceCreateTexture(device, &texDesc);
+    ASSERT_NE(texture, nullptr);
+
+    WGPUTexelCopyTextureInfo texInfo = {};
+    texInfo.texture = texture;
+    texInfo.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferLayout writeLayout = {};
+    writeLayout.bytesPerRow = 4;
+    writeLayout.rowsPerImage = 1;
+    wgpuQueueWriteTexture(queue, &texInfo, texels, sizeof(texels), &writeLayout, &texDesc.size);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = readSize;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+
+    WGPUTexelCopyBufferInfo bufInfo = {};
+    bufInfo.buffer = readBuffer;
+    bufInfo.layout.bytesPerRow = bytesPerRow;
+    bufInfo.layout.rowsPerImage = 1;
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &texInfo, &bufInfo, &texDesc.size);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(cmd);
+
+    const uint8_t* readback = (const uint8_t*)mapBufferSync(instance, readBuffer, WGPUMapMode_Read, 0, readSize);
+    ASSERT_NE(readback, nullptr);
+    EXPECT_EQ(memcmp(readback, texels[0], 4), 0) << "slice z = 0";
+    EXPECT_EQ(memcmp(readback + bytesPerRow, texels[1], 4), 0) << "slice z = 1";
+
+    wgpuBufferUnmap(readBuffer);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBufferRelease(readBuffer);
+    wgpuTextureRelease(texture);
+}
+
+TEST_F(WebGPUTest, Texture3DDefaultViewHasOneLayer) {
+    WGPUTextureDescriptor texDesc = {};
+    texDesc.size = {1, 1, 2};
+    texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage = WGPUTextureUsage_TextureBinding;
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount = 1;
+    texDesc.dimension = WGPUTextureDimension_3D;
+    WGPUTexture texture = wgpuDeviceCreateTexture(device, &texDesc);
+    ASSERT_NE(texture, nullptr);
+
+    WGPUTextureView view = wgpuTextureCreateView(texture, nullptr);
+    ASSERT_NE(view, nullptr);
+    EXPECT_EQ(view->subresourceRange.layerCount, 1u);
+
+    wgpuTextureViewRelease(view);
+    wgpuTextureRelease(texture);
+}
+
 // ============================================================
 // P0 Buffer Mapping Tests
 // ============================================================
