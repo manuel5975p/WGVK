@@ -7172,7 +7172,14 @@ void wgpuCommandEncoderCopyBufferToBuffer  (WGPUCommandEncoder commandEncoder, W
             .access = VK_ACCESS_TRANSFER_READ_BIT
         }
     );
-
+    ce_trackBuffer(
+        commandEncoder,
+        destination,
+        (BufferUsageSnap){
+            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .access = VK_ACCESS_TRANSFER_WRITE_BIT
+        }
+    );
 
     const VkBufferCopy copy = {
         .srcOffset = sourceOffset,
@@ -7198,18 +7205,9 @@ void wgpuCommandEncoderCopyBufferToBuffer  (WGPUCommandEncoder commandEncoder, W
     //        0, NULL
     //    );
     //}
-
-    ce_trackBuffer(
-        commandEncoder,
-        destination,
-        (BufferUsageSnap){
-            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .access = VK_ACCESS_TRANSFER_WRITE_BIT
-        }
-    );
     EXIT();
 }
-void wgpuCommandEncoderCopyBufferToTexture (WGPUCommandEncoder commandEncoder, const WGPUTexelCopyBufferInfo* source, const WGPUTexelCopyTextureInfo* destination, WGPUExtent3D const * copySize){
+void wgpuCommandEncoderCopyBufferToTexture(WGPUCommandEncoder commandEncoder, const WGPUTexelCopyBufferInfo* source, const WGPUTexelCopyTextureInfo* destination, WGPUExtent3D const * copySize){
     ENTRY();
 
     ++commandEncoder->encodedCommandCount;

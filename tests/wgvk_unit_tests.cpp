@@ -2885,6 +2885,74 @@ TEST_F(WebGPUTest, CopyBufferToBuffer_PartialWithOffsets) {
     wgpuBufferRelease(readBuffer);
 }
 
+TEST_F(WebGPUTest, CopyBufferToBuffer_TwoCopiesIntoSameDestination) {
+    const uint32_t elementCount = 64;
+    const uint32_t bufferSize = elementCount * sizeof(uint32_t);
+
+    WGPUBufferDescriptor srcDesc = {};
+    srcDesc.size = bufferSize;
+    srcDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_MapWrite;
+    srcDesc.mappedAtCreation = true;
+
+    WGPUBuffer firstSource = wgpuDeviceCreateBuffer(device, &srcDesc);
+    ASSERT_NE(firstSource, nullptr);
+    uint32_t* firstData = (uint32_t*)wgpuBufferGetMappedRange(firstSource, 0, bufferSize);
+    for (uint32_t i = 0; i < elementCount; ++i) firstData[i] = 0x11110000 + i;
+    wgpuBufferUnmap(firstSource);
+
+    WGPUBuffer secondSource = wgpuDeviceCreateBuffer(device, &srcDesc);
+    ASSERT_NE(secondSource, nullptr);
+    uint32_t* secondData = (uint32_t*)wgpuBufferGetMappedRange(secondSource, 0, bufferSize);
+    for (uint32_t i = 0; i < elementCount; ++i) secondData[i] = 0x22220000 + i;
+    wgpuBufferUnmap(secondSource);
+
+    WGPUBufferDescriptor dstDesc = {};
+    dstDesc.size = bufferSize;
+    dstDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer destination = wgpuDeviceCreateBuffer(device, &dstDesc);
+    ASSERT_NE(destination, nullptr);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = bufferSize;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+    ASSERT_NE(readBuffer, nullptr);
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, firstSource, 0, destination, 0, bufferSize);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, secondSource, 0, destination, 0, bufferSize);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, destination, 0, readBuffer, 0, bufferSize);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(cmd);
+
+    struct MapCtx { bool done = false; } mapCtx;
+    auto mapCb = [](WGPUMapAsyncStatus, WGPUStringView, void* ud, void*) {
+        ((MapCtx*)ud)->done = true;
+    };
+    WGPUBufferMapCallbackInfo mapCbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
+    WGPUFuture mapFut = wgpuBufferMapAsync(readBuffer, WGPUMapMode_Read, 0, bufferSize, mapCbInfo);
+    WGPUFutureWaitInfo fwi = { mapFut, 0 };
+    while (!mapCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT64_MAX);
+    }
+
+    const uint32_t* results = (const uint32_t*)wgpuBufferGetConstMappedRange(readBuffer, 0, bufferSize);
+    ASSERT_NE(results, nullptr);
+    for (uint32_t i = 0; i < elementCount; ++i) {
+        EXPECT_EQ(results[i], 0x22220000 + i) << "Index " << i << " does not hold the second copy";
+    }
+
+    wgpuBufferUnmap(readBuffer);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBufferRelease(firstSource);
+    wgpuBufferRelease(secondSource);
+    wgpuBufferRelease(destination);
+    wgpuBufferRelease(readBuffer);
+}
+
 TEST_F(WebGPUTest, CopyBufferToTexture_RGBA8) {
     const uint32_t width = 64;
     const uint32_t height = 64;
