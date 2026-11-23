@@ -6781,6 +6781,172 @@ TEST_F(WebGPUTest, MemoryPlacement_SubmitDoesNotFenceNonMappableBuffers) {
     wgpuBufferRelease(mappable);
 }
 
+// wgpuQueueWriteBuffer must be ordered after previously submitted work that reads the buffer.
+// A non-mappable Uniform|CopyDst buffer in HOST_VISIBLE memory (UMA, lavapipe, ReBAR) is written
+// through wgpuBufferMap + memcpy; without a fence on it the write lands while the dispatch still runs.
+// The shader spins first and only then loads the uniform, at an index the compiler cannot hoist.
+TEST_F(WebGPUTest, QueueWriteBufferDoesNotRaceInFlightUniformRead) {
+    constexpr uint32_t oldValue = 111u;
+    constexpr uint32_t newValue = 222u;
+    constexpr uint64_t uniformSize = 2 * 4 * sizeof(uint32_t); // uvec4 v[2]
+    constexpr uint64_t outSize = 2 * sizeof(uint32_t);         // spin, seen
+
+    const char* wgslCode = R"(
+        struct U { v: array<vec4<u32>, 2> }
+        struct Out { spin: u32, seen: u32 }
+        @group(0) @binding(0) var<uniform> u: U;
+        @group(0) @binding(1) var<storage, read_write> o: Out;
+        @compute @workgroup_size(1)
+        fn main() {
+            var acc: u32 = 0x9E3779B9u;
+            for (var i: u32 = 0u; i < 33554432u; i = i + 1u) {
+                acc = acc * 1664525u + 1013904223u;
+                acc = acc ^ (acc >> 13u);
+            }
+            o.spin = acc;
+            var idx: u32 = 0u;
+            if (acc == 0xFFFFFFFFu) { idx = 1u; }
+            o.seen = u.v[idx].x;
+        }
+    )";
+    WGPUShaderSourceWGSL wgslSource = {};
+    wgslSource.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgslSource.code = { wgslCode, strlen(wgslCode) };
+    WGPUShaderModuleDescriptor shaderDesc = {};
+    shaderDesc.nextInChain = &wgslSource.chain;
+    WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(device, &shaderDesc);
+    ASSERT_NE(shaderModule, nullptr);
+
+    WGPUBufferDescriptor uniformDesc = {};
+    uniformDesc.size = uniformSize;
+    uniformDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    WGPUBuffer uniformBuffer = wgpuDeviceCreateBuffer(device, &uniformDesc);
+    ASSERT_NE(uniformBuffer, nullptr);
+
+    WGPUBufferDescriptor outDesc = {};
+    outDesc.size = outSize;
+    outDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer outBuffer = wgpuDeviceCreateBuffer(device, &outDesc);
+    ASSERT_NE(outBuffer, nullptr);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = outSize;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+    ASSERT_NE(readBuffer, nullptr);
+
+    const bool directMapPath = (uniformBuffer->memoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+    RecordProperty("uniformHostVisible", directMapPath ? "true" : "false");
+    if (!directMapPath) {
+        printf("[ INFO     ] uniform buffer is not HOST_VISIBLE: wgpuQueueWriteBuffer takes the staging path, race not exercised on this adapter\n");
+    }
+
+    WGPUBindGroupLayoutEntry bglEntries[2] = {};
+    bglEntries[0].binding = 0;
+    bglEntries[0].visibility = WGPUShaderStage_Compute;
+    bglEntries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    bglEntries[0].buffer.minBindingSize = uniformSize;
+    bglEntries[1].binding = 1;
+    bglEntries[1].visibility = WGPUShaderStage_Compute;
+    bglEntries[1].buffer.type = WGPUBufferBindingType_Storage;
+    bglEntries[1].buffer.minBindingSize = outSize;
+
+    WGPUBindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 2;
+    bglDesc.entries = bglEntries;
+    WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    ASSERT_NE(bgl, nullptr);
+
+    WGPUPipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts = &bgl;
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
+    ASSERT_NE(pipelineLayout, nullptr);
+
+    WGPUComputePipelineDescriptor pipeDesc = {};
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.compute.module = shaderModule;
+    pipeDesc.compute.entryPoint = { "main", 4 };
+    WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device, &pipeDesc);
+    ASSERT_NE(pipeline, nullptr);
+
+    WGPUBindGroupEntry bgEntries[2] = {};
+    bgEntries[0].binding = 0;
+    bgEntries[0].buffer = uniformBuffer;
+    bgEntries[0].size = uniformSize;
+    bgEntries[1].binding = 1;
+    bgEntries[1].buffer = outBuffer;
+    bgEntries[1].size = outSize;
+
+    WGPUBindGroupDescriptor bgDesc = {};
+    bgDesc.layout = bgl;
+    bgDesc.entryCount = 2;
+    bgDesc.entries = bgEntries;
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(device, &bgDesc);
+    ASSERT_NE(bindGroup, nullptr);
+
+    auto writeUniform = [&](uint32_t value) {
+        uint32_t data[8] = {};
+        data[0] = value; // v[0].x
+        data[4] = value; // v[1].x
+        wgpuQueueWriteBuffer(queue, uniformBuffer, 0, data, sizeof(data));
+    };
+    auto submitDispatch = [&]() {
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+        WGPUComputePassDescriptor passDesc = {};
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+        WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+        wgpuQueueSubmit(queue, 1, &cmd);
+        wgpuCommandEncoderRelease(encoder);
+        wgpuCommandBufferRelease(cmd);
+    };
+    auto readSeen = [&]() -> uint32_t {
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+        wgpuCommandEncoderCopyBufferToBuffer(encoder, outBuffer, 0, readBuffer, 0, outSize);
+        WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+        wgpuQueueSubmit(queue, 1, &cmd);
+        wgpuCommandEncoderRelease(encoder);
+        wgpuCommandBufferRelease(cmd);
+        const uint32_t* mapped = (const uint32_t*)mapBufferSync(instance, readBuffer, WGPUMapMode_Read, 0, outSize);
+        if (mapped == nullptr) {
+            ADD_FAILURE() << "mapping readback buffer failed";
+            return 0;
+        }
+        const uint32_t seen = mapped[1];
+        wgpuBufferUnmap(readBuffer);
+        return seen;
+    };
+
+    // Phase 1: the write issued after the submit must not be observed by the in-flight dispatch.
+    writeUniform(oldValue);
+    submitDispatch();
+    writeUniform(newValue);
+    const uint32_t seenByFirstDispatch = readSeen();
+    EXPECT_EQ(seenByFirstDispatch, oldValue)
+        << "wgpuQueueWriteBuffer after wgpuQueueSubmit was observed by the already submitted dispatch "
+        << "(uniform HOST_VISIBLE: " << (directMapPath ? "yes" : "no") << ")";
+
+    // Phase 2: the write must be visible to work submitted after it.
+    submitDispatch();
+    EXPECT_EQ(readSeen(), newValue) << "wgpuQueueWriteBuffer was not visible to a later dispatch";
+
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBindGroupRelease(bindGroup);
+    wgpuComputePipelineRelease(pipeline);
+    wgpuPipelineLayoutRelease(pipelineLayout);
+    wgpuBindGroupLayoutRelease(bgl);
+    wgpuShaderModuleRelease(shaderModule);
+    wgpuBufferRelease(readBuffer);
+    wgpuBufferRelease(outBuffer);
+    wgpuBufferRelease(uniformBuffer);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
