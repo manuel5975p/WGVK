@@ -1478,6 +1478,7 @@ typedef enum RCPassCommandType{
     rp_command_type_multi_draw_indirect,
     rp_command_type_enum_count,
     rt_command_type_trace_rays,
+    rt_command_type_trace_rays_indirect,
     rp_command_type_set_force32 = 0x7fffffff
 }RCPassCommandType;
 
@@ -1615,6 +1616,14 @@ typedef struct RaytracingPassCommandTraceRays{
     uint32_t depth;
 }RaytracingPassCommandTraceRays;
 
+typedef struct RaytracingPassCommandTraceRaysIndirect{
+    uint32_t rayGenerationOffset;
+    uint32_t rayHitOffset;
+    uint32_t rayMissOffset;
+    WGPUBuffer indirectBuffer;
+    uint64_t indirectOffset;
+}RaytracingPassCommandTraceRaysIndirect;
+
 typedef struct RenderPassCommandBegin{
     WGPUStringView label;
     size_t colorAttachmentCount;
@@ -1652,6 +1661,7 @@ typedef struct RenderPassCommandGeneric {
         ComputePassCommandDispatchWorkgroups dispatchWorkgroups;
         ComputePassCommandDispatchWorkgroupsIndirect dispatchWorkgroupsIndirect;
         RaytracingPassCommandTraceRays traceRays;
+        RaytracingPassCommandTraceRaysIndirect traceRaysIndirect;
     };
 }RenderPassCommandGeneric;
 
