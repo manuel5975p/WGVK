@@ -6846,6 +6846,492 @@ TEST_F(WebGPUTest, TimestampQuery_MultipleResolves) {
     free(qs);
 }
 
+namespace {
+
+bool resolveChosenMemoryFlags(WGPUDevice device, WGPUBuffer buffer, VkMemoryPropertyFlags* outFlags) {
+    if (buffer->allocationType != AllocationTypeBuiltin) {
+        return false;
+    }
+    const WgvkDeviceMemoryPool* pool = buffer->builtinAllocation.pool;
+    if (pool == nullptr) {
+        return false;
+    }
+    const VkPhysicalDeviceMemoryProperties& properties = device->builtinAllocator.memoryProperties;
+    if (pool->memoryTypeIndex >= properties.memoryTypeCount) {
+        return false;
+    }
+    *outFlags = properties.memoryTypes[pool->memoryTypeIndex].propertyFlags;
+    return true;
+}
+
+bool hasDeviceLocalOnlyMemoryType(WGPUDevice device) {
+    const VkPhysicalDeviceMemoryProperties& properties = device->builtinAllocator.memoryProperties;
+    for (uint32_t i = 0; i < properties.memoryTypeCount; ++i) {
+        const VkMemoryPropertyFlags flags = properties.memoryTypes[i].propertyFlags;
+        const bool deviceLocal = (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+        const bool hostVisible = (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+        if (deviceLocal && !hostVisible) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool readBufferContents(
+    WGPUInstance instance,
+    WGPUDevice device,
+    WGPUQueue queue,
+    WGPUBuffer source,
+    void* destination,
+    uint32_t size
+) {
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = size;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+    if (readBuffer == nullptr) {
+        return false;
+    }
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, source, 0, readBuffer, 0, size);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(cmd);
+
+    struct MapCtx { bool done = false; } mapCtx;
+    auto mapCb = [](WGPUMapAsyncStatus, WGPUStringView, void* ud, void*) {
+        ((MapCtx*)ud)->done = true;
+    };
+    WGPUBufferMapCallbackInfo mapCbInfo = { nullptr, WGPUCallbackMode_WaitAnyOnly, mapCb, &mapCtx, nullptr };
+    WGPUFuture mapFut = wgpuBufferMapAsync(readBuffer, WGPUMapMode_Read, 0, size, mapCbInfo);
+    WGPUFutureWaitInfo fwi = { mapFut, 0 };
+    while (!mapCtx.done) {
+        wgpuInstanceWaitAny(instance, 1, &fwi, UINT64_MAX);
+    }
+
+    const void* mapped = wgpuBufferGetConstMappedRange(readBuffer, 0, size);
+    const bool mappedOk = mapped != nullptr;
+    if (mappedOk) {
+        memcpy(destination, mapped, size);
+    }
+
+    wgpuBufferUnmap(readBuffer);
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+    wgpuBufferRelease(readBuffer);
+    return mappedOk;
+}
+
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_BufferWithoutMapUsageIsDeviceLocal) {
+    WGPUBufferDescriptor desc = {};
+    desc.size = 4096;
+    desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(device, &desc);
+    ASSERT_NE(buffer, nullptr);
+
+    VkMemoryPropertyFlags flags = 0;
+    if (!resolveChosenMemoryFlags(device, buffer, &flags)) {
+        wgpuBufferRelease(buffer);
+        GTEST_SKIP() << "Builtin allocator not in use, cannot inspect the chosen memory type";
+    }
+
+    EXPECT_TRUE(flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        << "A buffer with neither MapRead nor MapWrite must be placed in device-local memory";
+
+    if (hasDeviceLocalOnlyMemoryType(device)) {
+        EXPECT_FALSE(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+            << "This device exposes device-local memory that is not host-visible, "
+               "so an unmappable buffer should not be spending the host-visible window";
+    }
+
+    wgpuBufferRelease(buffer);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_MappableBuffersAreHostVisible) {
+    WGPUBufferDescriptor writeDesc = {};
+    writeDesc.size = 4096;
+    writeDesc.usage = WGPUBufferUsage_MapWrite | WGPUBufferUsage_CopySrc;
+    WGPUBuffer writeBuffer = wgpuDeviceCreateBuffer(device, &writeDesc);
+    ASSERT_NE(writeBuffer, nullptr);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = 4096;
+    readDesc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+    ASSERT_NE(readBuffer, nullptr);
+
+    VkMemoryPropertyFlags writeFlags = 0;
+    VkMemoryPropertyFlags readFlags = 0;
+    const bool resolved =
+        resolveChosenMemoryFlags(device, writeBuffer, &writeFlags) &&
+        resolveChosenMemoryFlags(device, readBuffer, &readFlags);
+    if (!resolved) {
+        wgpuBufferRelease(writeBuffer);
+        wgpuBufferRelease(readBuffer);
+        GTEST_SKIP() << "Builtin allocator not in use, cannot inspect the chosen memory type";
+    }
+
+    EXPECT_TRUE(writeFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+        << "A MapWrite buffer must be host-visible";
+    EXPECT_TRUE(readFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+        << "A MapRead buffer must be host-visible";
+
+    wgpuBufferRelease(writeBuffer);
+    wgpuBufferRelease(readBuffer);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_MemoryPropertiesRecordTheChosenMemoryType) {
+    WGPUBufferDescriptor storageDesc = {};
+    storageDesc.size = 4096;
+    storageDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer storageBuffer = wgpuDeviceCreateBuffer(device, &storageDesc);
+    ASSERT_NE(storageBuffer, nullptr);
+
+    WGPUBufferDescriptor mappableDesc = {};
+    mappableDesc.size = 4096;
+    mappableDesc.usage = WGPUBufferUsage_MapWrite | WGPUBufferUsage_CopySrc;
+    WGPUBuffer mappableBuffer = wgpuDeviceCreateBuffer(device, &mappableDesc);
+    ASSERT_NE(mappableBuffer, nullptr);
+
+    VkMemoryPropertyFlags storageFlags = 0;
+    VkMemoryPropertyFlags mappableFlags = 0;
+    const bool resolved =
+        resolveChosenMemoryFlags(device, storageBuffer, &storageFlags) &&
+        resolveChosenMemoryFlags(device, mappableBuffer, &mappableFlags);
+    if (!resolved) {
+        wgpuBufferRelease(storageBuffer);
+        wgpuBufferRelease(mappableBuffer);
+        GTEST_SKIP() << "Builtin allocator not in use, cannot inspect the chosen memory type";
+    }
+
+    // wgpuQueueWriteBuffer branches on memoryProperties to pick between mapping and staging
+    EXPECT_EQ(storageBuffer->memoryProperties, storageFlags)
+        << "memoryProperties must match the pool's memory type";
+    EXPECT_EQ(mappableBuffer->memoryProperties, mappableFlags)
+        << "memoryProperties must match the pool's memory type";
+
+    wgpuBufferRelease(storageBuffer);
+    wgpuBufferRelease(mappableBuffer);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_WriteBufferAtOffsetLeavesNeighboursIntact) {
+    const uint32_t elementCount = 256;
+    const uint32_t bufferSize = elementCount * sizeof(uint32_t);
+    const uint32_t patchFirst = 64;
+    const uint32_t patchCount = 64;
+
+    std::vector<uint32_t> baseline(elementCount);
+    for (uint32_t i = 0; i < elementCount; ++i) baseline[i] = 0x11110000u + i;
+
+    std::vector<uint32_t> patch(patchCount);
+    for (uint32_t i = 0; i < patchCount; ++i) patch[i] = 0x22220000u + i;
+
+    WGPUBufferDescriptor desc = {};
+    desc.size = bufferSize;
+    desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer target = wgpuDeviceCreateBuffer(device, &desc);
+    ASSERT_NE(target, nullptr);
+
+    wgpuQueueWriteBuffer(queue, target, 0, baseline.data(), bufferSize);
+    wgpuQueueWriteBuffer(
+        queue,
+        target,
+        patchFirst * sizeof(uint32_t),
+        patch.data(),
+        patchCount * sizeof(uint32_t)
+    );
+
+    std::vector<uint32_t> readback(elementCount, 0);
+    ASSERT_TRUE(readBufferContents(instance, device, queue, target, readback.data(), bufferSize));
+
+    for (uint32_t i = 0; i < patchFirst; ++i) {
+        EXPECT_EQ(readback[i], 0x11110000u + i)
+            << "Region before the offset was overwritten at index " << i;
+    }
+    for (uint32_t i = 0; i < patchCount; ++i) {
+        EXPECT_EQ(readback[patchFirst + i], 0x22220000u + i)
+            << "Patched region is wrong at index " << (patchFirst + i);
+    }
+    for (uint32_t i = patchFirst + patchCount; i < elementCount; ++i) {
+        EXPECT_EQ(readback[i], 0x11110000u + i)
+            << "Region after the patch was overwritten at index " << i;
+    }
+
+    wgpuBufferRelease(target);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_WriteBufferFillsBufferInDescendingChunks) {
+    const uint32_t elementCount = 512;
+    const uint32_t bufferSize = elementCount * sizeof(uint32_t);
+    const uint32_t chunkElements = 128;
+
+    std::vector<uint32_t> expected(elementCount);
+    for (uint32_t i = 0; i < elementCount; ++i) expected[i] = 0x33330000u + i;
+
+    WGPUBufferDescriptor desc = {};
+    desc.size = bufferSize;
+    desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer target = wgpuDeviceCreateBuffer(device, &desc);
+    ASSERT_NE(target, nullptr);
+
+    for (uint32_t first = elementCount; first > 0; first -= chunkElements) {
+        const uint32_t chunkStart = first - chunkElements;
+        wgpuQueueWriteBuffer(
+            queue,
+            target,
+            chunkStart * sizeof(uint32_t),
+            expected.data() + chunkStart,
+            chunkElements * sizeof(uint32_t)
+        );
+    }
+
+    std::vector<uint32_t> readback(elementCount, 0);
+    ASSERT_TRUE(readBufferContents(instance, device, queue, target, readback.data(), bufferSize));
+
+    for (uint32_t i = 0; i < elementCount; ++i) {
+        EXPECT_EQ(readback[i], expected[i]) << "Chunked write landed wrong at index " << i;
+    }
+
+    wgpuBufferRelease(target);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_MappedAtCreationWithoutMapUsage) {
+    const uint32_t elementCount = 128;
+    const uint32_t bufferSize = elementCount * sizeof(uint32_t);
+
+    WGPUBufferDescriptor desc = {};
+    desc.size = bufferSize;
+    desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    desc.mappedAtCreation = true;
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(device, &desc);
+    ASSERT_NE(buffer, nullptr);
+
+    uint32_t* mapped = (uint32_t*)wgpuBufferGetMappedRange(buffer, 0, bufferSize);
+    ASSERT_NE(mapped, nullptr) << "mappedAtCreation must produce a mapping for any usage";
+    for (uint32_t i = 0; i < elementCount; ++i) mapped[i] = 0x44440000u + i;
+    wgpuBufferUnmap(buffer);
+
+    std::vector<uint32_t> readback(elementCount, 0);
+    ASSERT_TRUE(readBufferContents(instance, device, queue, buffer, readback.data(), bufferSize));
+
+    for (uint32_t i = 0; i < elementCount; ++i) {
+        EXPECT_EQ(readback[i], 0x44440000u + i)
+            << "mappedAtCreation contents did not reach device memory at index " << i;
+    }
+
+    wgpuBufferRelease(buffer);
+}
+
+TEST_F(WebGPUTest, MemoryPlacement_SubmitDoesNotFenceNonMappableBuffers) {
+    WGPUBufferDescriptor sourceDesc = {};
+    sourceDesc.size = 1024;
+    sourceDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_MapWrite;
+    WGPUBuffer source = wgpuDeviceCreateBuffer(device, &sourceDesc);
+    ASSERT_NE(source, nullptr);
+
+    WGPUBufferDescriptor storageDesc = {};
+    storageDesc.size = 1024;
+    storageDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer storage = wgpuDeviceCreateBuffer(device, &storageDesc);
+    ASSERT_NE(storage, nullptr);
+
+    WGPUBufferDescriptor mappableDesc = {};
+    mappableDesc.size = 1024;
+    mappableDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer mappable = wgpuDeviceCreateBuffer(device, &mappableDesc);
+    ASSERT_NE(mappable, nullptr);
+
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, source, 0, storage, 0, 1024);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, source, 0, mappable, 0, 1024);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuCommandBufferRelease(cmd);
+
+    EXPECT_EQ(storage->latestFence, nullptr)
+        << "A buffer that can never be mapped should not be fence-stamped on submit";
+    EXPECT_NE(mappable->latestFence, nullptr)
+        << "A MapRead buffer must be fence-stamped so that mapping waits for the GPU";
+    EXPECT_NE(source->latestFence, nullptr)
+        << "A MapWrite buffer must be fence-stamped so that remapping waits for the GPU to read it";
+
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBufferRelease(source);
+    wgpuBufferRelease(storage);
+    wgpuBufferRelease(mappable);
+}
+
+// wgpuQueueWriteBuffer must be ordered after previously submitted work that reads the buffer.
+// A non-mappable Uniform|CopyDst buffer in HOST_VISIBLE memory (UMA, lavapipe, ReBAR) is written
+// through wgpuBufferMap + memcpy; without a fence on it the write lands while the dispatch still runs.
+// The shader spins first and only then loads the uniform, at an index the compiler cannot hoist.
+TEST_F(WebGPUTest, QueueWriteBufferDoesNotRaceInFlightUniformRead) {
+    constexpr uint32_t oldValue = 111u;
+    constexpr uint32_t newValue = 222u;
+    constexpr uint64_t uniformSize = 2 * 4 * sizeof(uint32_t); // uvec4 v[2]
+    constexpr uint64_t outSize = 2 * sizeof(uint32_t);         // spin, seen
+
+    const char* wgslCode = R"(
+        struct U { v: array<vec4<u32>, 2> }
+        struct Out { spin: u32, seen: u32 }
+        @group(0) @binding(0) var<uniform> u: U;
+        @group(0) @binding(1) var<storage, read_write> o: Out;
+        @compute @workgroup_size(1)
+        fn main() {
+            var acc: u32 = 0x9E3779B9u;
+            for (var i: u32 = 0u; i < 33554432u; i = i + 1u) {
+                acc = acc * 1664525u + 1013904223u;
+                acc = acc ^ (acc >> 13u);
+            }
+            o.spin = acc;
+            var idx: u32 = 0u;
+            if (acc == 0xFFFFFFFFu) { idx = 1u; }
+            o.seen = u.v[idx].x;
+        }
+    )";
+    WGPUShaderSourceWGSL wgslSource = {};
+    wgslSource.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgslSource.code = { wgslCode, strlen(wgslCode) };
+    WGPUShaderModuleDescriptor shaderDesc = {};
+    shaderDesc.nextInChain = &wgslSource.chain;
+    WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(device, &shaderDesc);
+    ASSERT_NE(shaderModule, nullptr);
+
+    WGPUBufferDescriptor uniformDesc = {};
+    uniformDesc.size = uniformSize;
+    uniformDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    WGPUBuffer uniformBuffer = wgpuDeviceCreateBuffer(device, &uniformDesc);
+    ASSERT_NE(uniformBuffer, nullptr);
+
+    WGPUBufferDescriptor outDesc = {};
+    outDesc.size = outSize;
+    outDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer outBuffer = wgpuDeviceCreateBuffer(device, &outDesc);
+    ASSERT_NE(outBuffer, nullptr);
+
+    WGPUBufferDescriptor readDesc = {};
+    readDesc.size = outSize;
+    readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+    WGPUBuffer readBuffer = wgpuDeviceCreateBuffer(device, &readDesc);
+    ASSERT_NE(readBuffer, nullptr);
+
+    const bool directMapPath = (uniformBuffer->memoryProperties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+    RecordProperty("uniformHostVisible", directMapPath ? "true" : "false");
+    if (!directMapPath) {
+        printf("[ INFO     ] uniform buffer is not HOST_VISIBLE: wgpuQueueWriteBuffer takes the staging path, race not exercised on this adapter\n");
+    }
+
+    WGPUBindGroupLayoutEntry bglEntries[2] = {};
+    bglEntries[0].binding = 0;
+    bglEntries[0].visibility = WGPUShaderStage_Compute;
+    bglEntries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    bglEntries[0].buffer.minBindingSize = uniformSize;
+    bglEntries[1].binding = 1;
+    bglEntries[1].visibility = WGPUShaderStage_Compute;
+    bglEntries[1].buffer.type = WGPUBufferBindingType_Storage;
+    bglEntries[1].buffer.minBindingSize = outSize;
+
+    WGPUBindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 2;
+    bglDesc.entries = bglEntries;
+    WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    ASSERT_NE(bgl, nullptr);
+
+    WGPUPipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts = &bgl;
+    WGPUPipelineLayout pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
+    ASSERT_NE(pipelineLayout, nullptr);
+
+    WGPUComputePipelineDescriptor pipeDesc = {};
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.compute.module = shaderModule;
+    pipeDesc.compute.entryPoint = { "main", 4 };
+    WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device, &pipeDesc);
+    ASSERT_NE(pipeline, nullptr);
+
+    WGPUBindGroupEntry bgEntries[2] = {};
+    bgEntries[0].binding = 0;
+    bgEntries[0].buffer = uniformBuffer;
+    bgEntries[0].size = uniformSize;
+    bgEntries[1].binding = 1;
+    bgEntries[1].buffer = outBuffer;
+    bgEntries[1].size = outSize;
+
+    WGPUBindGroupDescriptor bgDesc = {};
+    bgDesc.layout = bgl;
+    bgDesc.entryCount = 2;
+    bgDesc.entries = bgEntries;
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(device, &bgDesc);
+    ASSERT_NE(bindGroup, nullptr);
+
+    auto writeUniform = [&](uint32_t value) {
+        uint32_t data[8] = {};
+        data[0] = value; // v[0].x
+        data[4] = value; // v[1].x
+        wgpuQueueWriteBuffer(queue, uniformBuffer, 0, data, sizeof(data));
+    };
+    auto submitDispatch = [&]() {
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+        WGPUComputePassDescriptor passDesc = {};
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+        WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+        wgpuQueueSubmit(queue, 1, &cmd);
+        wgpuCommandEncoderRelease(encoder);
+        wgpuCommandBufferRelease(cmd);
+    };
+    auto readSeen = [&]() -> uint32_t {
+        WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
+        wgpuCommandEncoderCopyBufferToBuffer(encoder, outBuffer, 0, readBuffer, 0, outSize);
+        WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
+        wgpuQueueSubmit(queue, 1, &cmd);
+        wgpuCommandEncoderRelease(encoder);
+        wgpuCommandBufferRelease(cmd);
+        const uint32_t* mapped = (const uint32_t*)mapBufferSync(instance, readBuffer, WGPUMapMode_Read, 0, outSize);
+        if (mapped == nullptr) {
+            ADD_FAILURE() << "mapping readback buffer failed";
+            return 0;
+        }
+        const uint32_t seen = mapped[1];
+        wgpuBufferUnmap(readBuffer);
+        return seen;
+    };
+
+    // Phase 1: the write issued after the submit must not be observed by the in-flight dispatch.
+    writeUniform(oldValue);
+    submitDispatch();
+    writeUniform(newValue);
+    const uint32_t seenByFirstDispatch = readSeen();
+    EXPECT_EQ(seenByFirstDispatch, oldValue)
+        << "wgpuQueueWriteBuffer after wgpuQueueSubmit was observed by the already submitted dispatch "
+        << "(uniform HOST_VISIBLE: " << (directMapPath ? "yes" : "no") << ")";
+
+    // Phase 2: the write must be visible to work submitted after it.
+    submitDispatch();
+    EXPECT_EQ(readSeen(), newValue) << "wgpuQueueWriteBuffer was not visible to a later dispatch";
+
+    for (uint32_t i = 0; i < framesInFlight; i++) wgpuDeviceTick(device);
+
+    wgpuBindGroupRelease(bindGroup);
+    wgpuComputePipelineRelease(pipeline);
+    wgpuPipelineLayoutRelease(pipelineLayout);
+    wgpuBindGroupLayoutRelease(bgl);
+    wgpuShaderModuleRelease(shaderModule);
+    wgpuBufferRelease(readBuffer);
+    wgpuBufferRelease(outBuffer);
+    wgpuBufferRelease(uniformBuffer);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
